@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/launcher_background" />
+    <!-- The round yellow flag badge inside the adaptive icon safe zone. -->
+    <foreground>
+        <inset android:drawable="@drawable/brand_icon" android:inset="20%" />
+    </foreground>
+</adaptive-icon>
