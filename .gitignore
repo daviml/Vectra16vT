@@ -1,0 +1,18 @@
+# Conversas exportadas do Claude (passam de 100MB — limite do GitHub)
+*.jsonl
+docs/conversa/
+
+# APK e vídeos: gerados/pesados, não versionar
+*.apk
+*.aab
+*.mp4
+
+# Build Android (o app/.gitignore cobre o resto)
+app/build/
+app/*/build/
+app/.gradle/
+local.properties
+
+# Sistema
+Thumbs.db
+desktop.ini

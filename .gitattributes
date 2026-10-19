@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Arquivos da ECU: preservar bytes exatos (o .msq tem linha 1 LF e o resto CRLF)
+*.msq -text
+*.msl -text
+*.ini -text

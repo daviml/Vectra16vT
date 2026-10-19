@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="iniName">mainController.ini</string>
+    <string name="msqName">2026-10-15_12.09.45.msq</string>
+    <boolean name="disclaimer" value="true" />
+    <set name="symbols">
+        <string>CELSIUS</string>
+        <string>LAMBDA</string>
+        <string>PORT_STATUS</string>
+    </set>
+</map>
