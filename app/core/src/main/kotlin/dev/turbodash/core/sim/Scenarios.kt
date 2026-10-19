@@ -49,17 +49,27 @@ class SyntheticEngine(
      * 30 s of hard driving, boost for ~12 s of it: 2nd and 3rd gear pulls with a shift,
      * lift-off, a short cruise and back to idle.
      */
+    private val launchRpm = tune.scalar("launch_hrd_lim")?.takeIf { it > 0 } ?: 4000.0
+
+    /** Launch button held (2.5-5 s of the pulls cycle) and the ECU in launch (3-5 s). */
+    private fun launchPhase(t: Double): Pair<Boolean, Boolean> {
+        if (scenario != Scenario.BOOST_PULLS) return false to false
+        val p = t % 30.0
+        return (p >= 2.5 && p < 5) to (p >= 3 && p < 5)
+    }
+
     private fun pulls(t: Double): Triple<Double, Double, Double> {
         val p = t % 30.0
         val peak = 165.0
         return when {
             p < 3 -> Triple(950 + noise(t, 3.1, 25.0), 36 + noise(t, 2.3, 2.0), 0.0)
-            p < 5 -> Triple(lerp(1200.0, 2800.0, (p - 3) / 2), lerp(60.0, 95.0, (p - 3) / 2), 40.0)
+            // Launch: button held, foot down, the ECU holds the launch rpm.
+            p < 5 -> Triple(launchRpm - 150 + noise(t, 9.0, 120.0), 88 + noise(t, 5.0, 3.0), 100.0)
             // 2nd gear: the turbo spools in the first ~2.5 s.
             p < 11 -> Triple(lerp(2800.0, 6200.0, (p - 5) / 6), lerp(95.0, peak, (p - 5) / 2.5) + noise(t, 4.0, 2.0), 100.0)
             p < 12 -> Triple(lerp(6200.0, 4300.0, p - 11), lerp(peak, 75.0, p - 11), 0.0) // shift
             p < 17 -> Triple(lerp(4300.0, 6200.0, (p - 12) / 5), lerp(120.0, peak, (p - 12) / 1.2) + noise(t, 4.0, 2.0), 100.0)
-            p < 21 -> Triple(lerp(6200.0, 2500.0, (p - 17) / 4), 25.0, 0.0) // lift-off, overrun
+            p < 21 -> Triple(lerp(6200.0, 2500.0, (p - 17) / 4), 15.0, 0.0) // lift-off, overrun (real logs: 11-17 kPa)
             p < 27 -> Triple(2300 + noise(t, 0.7, 100.0), 50 + noise(t, 0.9, 4.0), 12.0)
             else -> Triple(lerp(2300.0, 950.0, (p - 27) / 3), 28.0, 0.0)
         }
@@ -114,7 +124,9 @@ class SyntheticEngine(
 
         val veCurr = ve?.interpolate(rpm, map) ?: 70.0
         val wue = interp(wueTemps, wueBins, clt, 100.0)
-        val pw = if (rpm < 300) 0.0 else reqFuel * veCurr / 100 * map / 100 * wue / 100 + injOpen
+        // Overrun fuel cut after 1.5 s of lift-off, like the ECU (fc_delay).
+        val overrunCut = scenario == Scenario.BOOST_PULLS && (t % 30.0).let { it >= 18.5 && it < 21 }
+        val pw = if (rpm < 300 || overrunCut) 0.0 else reqFuel * veCurr / 100 * map / 100 * wue / 100 + injOpen
         val retard = interp(matTemps, matRetard, mat, 0.0)
         val advance = (adv?.interpolate(rpm, map) ?: 20.0) - retard
 
@@ -156,6 +168,9 @@ class SyntheticEngine(
             // Regulator referenced to the manifold: base 3 bar plus boost.
             "fuel" to 3.0 + maxOf(0.0, map - baro) / 100 + noise(t, 1.7, 0.05),
             "oil" to 1.2 + rpm / 2000 - (clt - 80).coerceAtLeast(0.0) * 0.01,
+            // Inputs as a real MegaSpeed reports them (211 at rest; PE1 low while the launch button is held).
+            "portbde" to if (launchPhase(t).first) 209.0 else 211.0,
+            "status2" to if (launchPhase(t).second) 8.0 else 0.0,
         )
     }
 }

@@ -91,6 +91,14 @@ fun DashboardScreen(
     val log by sessions.log.collectAsStateWithLifecycle()
     val ini by sessions.ini.collectAsStateWithLifecycle()
     val roles = remember(ini) { sessions.roles() }
+    val tuneInfo by sessions.tune.collectAsStateWithLifecycle()
+    val launch = dev.turbodash.core.ecu.Launch.state(snapshot, tuneInfo?.tune)
+    // Pops windows can be 0.1 s long: keep the badge up at least ~0.7 s so it can be seen.
+    val popsUntil = remember { longArrayOf(0L) } // plain holder: no recomposition on write
+    val popsNow = dev.turbodash.core.ecu.Pops.active(snapshot, roles)
+    val now = android.os.SystemClock.elapsedRealtime()
+    if (popsNow) popsUntil[0] = now + 700
+    val pops = popsNow || now < popsUntil[0]
     val history = remember { DashHistory() }
     var showDestinations by remember { mutableStateOf(false) }
     if (showDestinations) DestinationsDialog(nav, sessions.gps) { showDestinations = false }
@@ -110,7 +118,7 @@ fun DashboardScreen(
 
     Column(Modifier.fillMaxSize().background(Palette.background)) {
         // No tab names: swipe sideways to switch between Rua and Diagnóstico.
-        StatusBar(state, log?.rows, onOpenSettings, Modifier.fillMaxWidth())
+        StatusBar(state, log?.rows, launch, pops, onOpenSettings, Modifier.fillMaxWidth())
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { page ->
             val rows = DashTemplates.all[page].rows
             BoxWithConstraints(Modifier.fillMaxSize().padding(4.dp)) {
@@ -169,7 +177,14 @@ private fun rowWeight(row: List<DashWidget>, style: DashStyle): Float = row.maxO
 }
 
 @Composable
-private fun StatusBar(state: SessionState?, logRows: Int?, onOpenSettings: () -> Unit, modifier: Modifier) {
+private fun StatusBar(
+    state: SessionState?,
+    logRows: Int?,
+    launch: dev.turbodash.core.ecu.LaunchState,
+    pops: Boolean,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier,
+) {
     val (text, color) = when (state) {
         null -> "Desconectado — toque para conectar" to Palette.muted
         is SessionState.Connecting -> "Conectando… (tentativa ${state.attempt})" to Palette.warn
@@ -184,7 +199,13 @@ private fun StatusBar(state: SessionState?, logRows: Int?, onOpenSettings: () ->
     ) {
         Box(Modifier.size(10.dp).clip(CircleShape).background(color))
         Spacer(Modifier.width(8.dp))
-        Text(text, color = color, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 2)
+        // Launch / pops: a badge takes the place of the connection text (no extra space).
+        when {
+            launch != dev.turbodash.core.ecu.LaunchState.OFF ->
+                Box(Modifier.weight(1f)) { LaunchBadge(active = launch == dev.turbodash.core.ecu.LaunchState.ACTIVE) }
+            pops -> Box(Modifier.weight(1f)) { PopsBadge() }
+            else -> Text(text, color = color, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 2)
+        }
         // Brand logo, small, on the status line only (the gauges stay clean).
         dev.turbodash.app.Brand.logo?.let { logo ->
             androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(logo), contentDescription = null, modifier = Modifier.height(18.dp).padding(end = 8.dp))
@@ -200,3 +221,40 @@ private fun StatusBar(state: SessionState?, logRows: Int?, onOpenSettings: () ->
     }
 }
 
+
+/** Outline while the launch button is held; filled and pulsing once the ECU is holding the launch rpm. */
+@Composable
+private fun LaunchBadge(active: Boolean) {
+    val pulse by rememberInfiniteTransition(label = "launch").animateFloat(
+        0.55f, 1f, infiniteRepeatable(tween(260), RepeatMode.Reverse), label = "launch",
+    )
+    val shape = RoundedCornerShape(6.dp)
+    Text(
+        if (active) "LAUNCH ATIVO" else "LAUNCH",
+        color = if (active) Palette.background else Palette.accent,
+        fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp,
+        modifier = Modifier
+            .alpha(if (active) pulse else 1f)
+            .clip(shape)
+            .then(if (active) Modifier.background(Palette.accent) else Modifier.border(1.5.dp, Palette.accent, shape))
+            .padding(horizontal = 10.dp, vertical = 1.dp),
+    )
+}
+
+/** Overrun pops window (foot off, retarded spark, fuel still on): red, flickering like a backfire. */
+@Composable
+private fun PopsBadge() {
+    val flicker by rememberInfiniteTransition(label = "pops").animateFloat(
+        0.5f, 1f, infiniteRepeatable(tween(120), RepeatMode.Reverse), label = "pops",
+    )
+    Text(
+        "POPS",
+        color = androidx.compose.ui.graphics.Color.White,
+        fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp,
+        modifier = Modifier
+            .alpha(flicker)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Palette.danger)
+            .padding(horizontal = 10.dp, vertical = 1.dp),
+    )
+}

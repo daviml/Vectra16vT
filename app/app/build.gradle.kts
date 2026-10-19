@@ -14,27 +14,13 @@ android {
         applicationId = "dev.turbodash.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.4.1"
+        versionCode = 20
+        versionName = "0.4.4"
         // Trial builds: gradlew -PtrialDays=7 ... (0 = no expiry). The build time caps the trial even
         // if the app is reinstalled (first run + days, never past build + 2x days).
         val trialDays = (project.findProperty("trialDays") as String?)?.toIntOrNull() ?: 0
         buildConfigField("int", "TRIAL_DAYS", trialDays.toString())
         buildConfigField("long", "BUILD_TIME", if (trialDays > 0) "${System.currentTimeMillis()}L" else "0L")
-    }
-
-    // White label: one app, one look per brand. "costa" is a private demo for a pitch to
-    // Costa Mega Speed: do not publish it without their written permission.
-    flavorDimensions += "brand"
-    productFlavors {
-        create("turbodash") {
-            dimension = "brand"
-        }
-        create("costa") {
-            dimension = "brand"
-            applicationIdSuffix = ".costa" // installs next to TurboDash
-            versionNameSuffix = "-cms-demo"
-        }
     }
 
     buildTypes {
