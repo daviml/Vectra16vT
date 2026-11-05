@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,7 +27,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.turbodash.app.ui.Palette
 import dev.turbodash.core.alerts.Severity
-import dev.turbodash.core.dash.DashStyle
 import dev.turbodash.core.dash.DashWidget
 import dev.turbodash.core.dash.WidgetKind
 import java.util.Locale
@@ -71,31 +70,33 @@ class WidgetData(
     val value: Double?,
     val target: Double? = null,
     val alert: Severity? = null,
-    /** Recent values, oldest first (Digital style trend line). */
-    val history: FloatArray? = null,
     /** Values of [DashWidget.stack] for a [WidgetKind.STACK] cell. */
     val children: List<WidgetData> = emptyList(),
 )
 
-@Composable
-fun Widget(w: DashWidget, data: WidgetData, style: DashStyle, modifier: Modifier = Modifier) {
+/** Rounded tile background; tinted and outlined while its channel is in alert. */
+fun Modifier.tileFrame(alert: Severity?): Modifier {
     val shape = RoundedCornerShape(12.dp)
-    val alertColor = when (data.alert) {
+    val alertColor = when (alert) {
         Severity.CRITICAL -> Palette.danger
         Severity.WARNING -> Palette.warn
         null -> null
     }
-    var m = modifier.padding(3.dp).clip(shape).background(
+    val m = padding(3.dp).clip(shape).background(
         if (alertColor != null) alertColor.copy(alpha = 0.12f).compositeOver(Palette.surface) else Palette.surface,
     )
-    if (alertColor != null) m = m.border(2.dp, alertColor, shape)
-    when {
-        w.kind == WidgetKind.LAMBDA -> LambdaBar(w, data, m)
-        w.kind == WidgetKind.STACK -> StackTile(w, data, m)
-        style == DashStyle.DIGITAL -> DigitalTile(w, data, m)
-        w.kind == WidgetKind.ARC -> ArcGauge(w, data.value, m)
-        w.kind == WidgetKind.BAR -> BarGauge(w, data.value, m)
-        else -> NumberTile(w, data.value, m)
+    return if (alertColor != null) m.border(2.dp, alertColor, shape) else m
+}
+
+@Composable
+fun Widget(w: DashWidget, data: WidgetData, modifier: Modifier = Modifier) {
+    val m = modifier.tileFrame(data.alert)
+    when (w.kind) {
+        WidgetKind.LAMBDA -> LambdaBar(w, data, m)
+        WidgetKind.STACK -> StackTile(w, data, m)
+        WidgetKind.ARC -> ArcGauge(w, data.value, m)
+        WidgetKind.BAR -> BarGauge(w, data.value, m)
+        WidgetKind.NUMBER -> NumberTile(w, data.value, m)
     }
 }
 
@@ -113,12 +114,16 @@ private fun TitleRow(w: DashWidget, sizeSp: Float) {
     }
 }
 
+/**
+ * Title, big number and a scale under it: the zone ruler with a dot, or with [fill] a thin bar
+ * filled up to the value. [centered] puts the number in the middle instead of on the right.
+ */
 @Composable
-fun NumberTile(w: DashWidget, value: Double?, modifier: Modifier) {
+fun NumberTile(w: DashWidget, value: Double?, modifier: Modifier, centered: Boolean = false, fill: Boolean = false) {
     BoxWithConstraints(modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp)) {
         val text = fmt(value, w.digits)
         val titleSp = (maxHeight.value * 0.15f).coerceIn(10f, 14f)
-        val rulerDp = (maxHeight.value * 0.09f).coerceIn(6f, 11f)
+        val rulerDp = if (fill) 5f else (maxHeight.value * 0.09f).coerceIn(6f, 11f)
         val numberH = maxHeight.value - titleSp * 1.4f - rulerDp - 10f
         // Proportional bold digits (tabular, so values don't jitter) are narrower than monospace:
         // the number can be much larger in the same tile. A dot counts as half a digit.
@@ -126,13 +131,28 @@ fun NumberTile(w: DashWidget, value: Double?, modifier: Modifier) {
         val big = min(maxWidth.value / (units * 0.6f), numberH * 0.95f).coerceIn(12f, 110f)
         Column(Modifier.fillMaxSize()) {
             TitleRow(w, titleSp)
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = if (centered) Alignment.Center else Alignment.CenterEnd) {
                 Text(
                     text, color = levelColor(w, value), fontSize = big.sp, lineHeight = big.sp, fontWeight = FontWeight.Bold,
                     style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1, softWrap = false,
                 )
             }
-            Ruler(w, value, Modifier.fillMaxWidth().height(rulerDp.dp))
+            if (fill) FillBar(w, value, Modifier.fillMaxWidth().height(rulerDp.dp))
+            else Ruler(w, value, Modifier.fillMaxWidth().height(rulerDp.dp))
+        }
+    }
+}
+
+/** Thin bar filled from the minimum up to the value, in the value's level color. */
+@Composable
+fun FillBar(w: DashWidget, value: Double?, modifier: Modifier) {
+    val color = levelColor(w, value).let { if (it == Palette.text) Palette.ok else it }
+    Canvas(modifier) {
+        val r = CornerRadius(size.height / 2)
+        drawRoundRect(Palette.track, cornerRadius = r)
+        if (value != null) {
+            val f = ((value - w.min) / (w.max - w.min)).coerceIn(0.0, 1.0).toFloat()
+            if (f > 0f) drawRoundRect(color, size = Size(size.width * f, size.height), cornerRadius = r)
         }
     }
 }
@@ -168,70 +188,32 @@ fun Ruler(w: DashWidget, value: Double?, modifier: Modifier) {
     }
 }
 
-/** Several number tiles (with their rulers) stacked in one cell, e.g. RPM over speed. */
+/**
+ * Several number tiles (with their rulers) stacked in one cell, e.g. RPM over speed. A child
+ * stack is drawn inside it, side by side when [DashWidget.horizontal] (speed | gear).
+ */
 @Composable
 fun StackTile(w: DashWidget, data: WidgetData, modifier: Modifier) {
-    Column(modifier.fillMaxSize()) {
-        w.stack.forEachIndexed { i, child ->
-            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 10.dp).background(Palette.track))
-            NumberTile(child, data.children.getOrNull(i)?.value, Modifier.weight(1f))
-        }
+    @Composable
+    fun Child(i: Int, child: DashWidget, m: Modifier) {
+        val d = data.children.getOrNull(i)
+        if (child.kind == WidgetKind.STACK) StackTile(child, d ?: WidgetData(null), m)
+        else NumberTile(child, d?.value, m)
     }
-}
-
-/** Digital style: number, units and a trend line of the last ~30 s. */
-@Composable
-fun DigitalTile(w: DashWidget, data: WidgetData, modifier: Modifier) {
-    val value = data.value
-    val color = levelColor(w, value)
-    BoxWithConstraints(modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp)) {
-        val text = fmt(value, w.digits)
-        val titleSp = (maxHeight.value * 0.16f).coerceIn(10f, 15f)
-        val trendH = (maxHeight.value * 0.28f).coerceIn(10f, 60f)
-        val units = maxOf(text.count { it != '.' } + 0.5f * text.count { it == '.' }, 3f)
-        val big = min(maxWidth.value / (units * 0.6f), (maxHeight.value - titleSp * 1.5f - trendH) * 0.9f).coerceIn(12f, 110f)
-        Column(Modifier.fillMaxSize()) {
-            TitleRow(w, titleSp)
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                Text(
-                    text, color = color, fontSize = big.sp, lineHeight = big.sp, fontWeight = FontWeight.Bold,
-                    style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1, softWrap = false,
-                )
+    if (w.horizontal) {
+        Row(modifier.fillMaxSize()) {
+            w.stack.forEachIndexed { i, child ->
+                if (i > 0) Box(Modifier.fillMaxHeight().width(1.dp).padding(vertical = 10.dp).background(Palette.track))
+                Child(i, child, Modifier.weight(1f))
             }
-            Trend(w, data.history, if (color == Palette.text) Palette.accent else color, Modifier.fillMaxWidth().height(trendH.dp))
         }
-    }
-}
-
-/** Line of recent values scaled to the widget range, with warning/danger limits as faint lines. */
-@Composable
-private fun Trend(w: DashWidget, history: FloatArray?, color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        val span = (w.max - w.min).takeIf { it > 0 } ?: 1.0
-        val h = history?.takeIf { it.size >= 2 } ?: return@Canvas
-        // Zoom on the data so slow changes (air temperature creeping up) are visible, but never
-        // below 15% of the gauge range, so sensor noise does not look like a big swing.
-        var lo = h.min().toDouble()
-        var hi = h.max().toDouble()
-        val minWindow = span * 0.15
-        if (hi - lo < minWindow) { val mid = (hi + lo) / 2; lo = mid - minWindow / 2; hi = mid + minWindow / 2 }
-        val pad = (hi - lo) * 0.1
-        lo -= pad; hi += pad
-        fun y(v: Double) = size.height * (1f - ((v - lo) / (hi - lo)).toFloat())
-        // Limits drawn on the same scale as the line, only when they fall inside the window:
-        // the line crossing a limit means the value really crossed it.
-        listOfNotNull(w.warnHigh, w.warnLow).filter { it in lo..hi }
-            .forEach { drawLine(Palette.warn.copy(alpha = 0.5f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f) }
-        listOfNotNull(w.dangerHigh, w.dangerLow).filter { it in lo..hi }
-            .forEach { drawLine(Palette.danger.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f) }
-        val dx = size.width / (DashHistory.CAPACITY - 1)
-        val x0 = size.width - dx * (h.size - 1)
-        val path = Path()
-        h.forEachIndexed { i, v ->
-            val yy = y(v.toDouble()).coerceIn(0f, size.height)
-            if (i == 0) path.moveTo(x0, yy) else path.lineTo(x0 + dx * i, yy)
+    } else {
+        Column(modifier.fillMaxSize()) {
+            w.stack.forEachIndexed { i, child ->
+                if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 10.dp).background(Palette.track))
+                Child(i, child, Modifier.weight(1f))
+            }
         }
-        drawPath(path, color, style = Stroke(width = 2.5f, cap = StrokeCap.Round))
     }
 }
 
@@ -303,6 +285,14 @@ fun BarGauge(w: DashWidget, value: Double?, modifier: Modifier) {
     }
 }
 
+/** Lambda color against its target: red when lean (> target + 0.05), blue when well rich, green otherwise. */
+fun lambdaColor(value: Double?, target: Double?): Color = when {
+    value == null -> Palette.muted
+    target != null && value > target + 0.05 -> Palette.danger
+    target != null && value < target - 0.08 -> Palette.info
+    else -> Palette.ok
+}
+
 /**
  * Compact lambda row: label and target on one line, a thin rich→lean gradient bar under it,
  * and the value on the right. The orange tick is the target, the white tick lambda 1.0.
@@ -312,13 +302,7 @@ fun LambdaBar(w: DashWidget, data: WidgetData, modifier: Modifier) {
     val value = data.value
     val target = data.target
     fun frac(v: Double) = ((v - w.min) / (w.max - w.min)).coerceIn(0.0, 1.0).toFloat()
-    val lean = value != null && target != null && value > target + 0.05
-    val color = when {
-        value == null -> Palette.muted
-        lean -> Palette.danger
-        target != null && value < target - 0.08 -> Palette.info
-        else -> Palette.ok
-    }
+    val color = lambdaColor(value, target)
     BoxWithConstraints(modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp)) {
         val h = maxHeight.value
         val valueSp = (h * 0.55f).coerceIn(14f, 40f)

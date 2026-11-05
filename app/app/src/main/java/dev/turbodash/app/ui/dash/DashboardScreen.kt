@@ -26,15 +26,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,37 +50,21 @@ import dev.turbodash.core.ecu.Role
 import dev.turbodash.core.ecu.SessionState
 import dev.turbodash.core.ecu.Snapshot
 
-/** Last ~30 s of every role, sampled at 4 Hz, for the Digital style trend lines. */
-class DashHistory {
-    companion object { const val CAPACITY = 120 }
-
-    private val series = HashMap<Role, ArrayDeque<Float>>()
-    private var lastTime = -1.0
-
-    fun add(s: Snapshot, roles: ChannelRoles) {
-        if (s.time < lastTime) { series.clear(); lastTime = -1.0 } // new session
-        if (lastTime >= 0 && s.time - lastTime < 0.25) return
-        lastTime = s.time
-        for (role in Role.entries) {
-            val v = valueOf(role, s, roles) ?: continue
-            val q = series.getOrPut(role) { ArrayDeque(CAPACITY) }
-            if (q.size == CAPACITY) q.removeFirst()
-            q.addLast(v.toFloat())
-        }
-    }
-
-    fun get(role: Role): FloatArray? = series[role]?.toFloatArray()
+fun valueOf(role: Role, s: Snapshot, roles: ChannelRoles): Double? = when (role) {
+    Role.LAMBDA -> roles.lambda(s)
+    Role.GEAR -> roles.value(s, role)?.takeIf { it > 0 } // 0 = no gear: shows "--"
+    else -> roles.value(s, role)
 }
 
-fun valueOf(role: Role, s: Snapshot, roles: ChannelRoles): Double? =
-    if (role == Role.LAMBDA) roles.lambda(s) else roles.value(s, role)
-
+/**
+ * Page 0 is the main dashboard in the chosen [style] (Principal or Racing); swipe sideways for
+ * the template pages (Diagnóstico).
+ */
 @Composable
 fun DashboardScreen(
     sessions: SessionManager,
-    nav: dev.turbodash.app.nav.Navigation,
     style: DashStyle,
-    onStyleChange: (DashStyle) -> Unit,
+    onOpenMenu: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val snapshot by sessions.snapshot.collectAsStateWithLifecycle()
@@ -99,15 +81,7 @@ fun DashboardScreen(
     val now = android.os.SystemClock.elapsedRealtime()
     if (popsNow) popsUntil[0] = now + 700
     val pops = popsNow || now < popsUntil[0]
-    val history = remember { DashHistory() }
-    var showDestinations by remember { mutableStateOf(false) }
-    if (showDestinations) DestinationsDialog(nav, sessions.gps) { showDestinations = false }
-    val pager = rememberPagerState { DashTemplates.all.size }
-
-    LaunchedEffect(snapshot) {
-        val s = snapshot
-        if (s != null && roles != null) history.add(s, roles)
-    }
+    val pager = rememberPagerState { 1 + DashTemplates.all.size }
 
     // The dash is meant to stay on while driving.
     val view = LocalView.current
@@ -116,63 +90,80 @@ fun DashboardScreen(
         onDispose { view.keepScreenOn = false }
     }
 
-    Column(Modifier.fillMaxSize().background(Palette.background)) {
-        // No tab names: swipe sideways to switch between Rua and Diagnóstico.
-        StatusBar(state, log?.rows, launch, pops, onOpenSettings, Modifier.fillMaxWidth())
-        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { page ->
-            val rows = DashTemplates.all[page].rows
-            BoxWithConstraints(Modifier.fillMaxSize().padding(4.dp)) {
-                @Composable
-                fun RowsColumn(part: List<List<DashWidget>>, modifier: Modifier) {
-                    Column(modifier) {
-                        part.forEach { row ->
-                            Row(Modifier.fillMaxWidth().weight(rowWeight(row, style))) {
-                                row.forEach { w ->
-                                    if (w.kind == WidgetKind.MINIMAP) {
-                                        MiniMap(sessions.gps, nav, { showDestinations = true }, Modifier.weight(w.weight).fillMaxSize().padding(3.dp).clip(RoundedCornerShape(12.dp)))
-                                        return@forEach
-                                    }
-                                    val s = snapshot
-                                    fun dataFor(x: DashWidget) = WidgetData(
-                                        value = if (s == null || roles == null) null else valueOf(x.role, s, roles),
-                                        alert = alerts.filter { it.role == x.role }.minByOrNull { it.severity.ordinal * -1 }?.severity,
-                                    )
-                                    val children = w.stack.map { dataFor(it) }
-                                    val data = WidgetData(
-                                        children = children,
-                                        value = if (s == null || roles == null) null else valueOf(w.role, s, roles),
-                                        target = if (s != null && w.kind == WidgetKind.LAMBDA) roles?.lambdaTarget(s) else null,
-                                        alert = (if (w.kind == WidgetKind.STACK) children.mapNotNull { it.alert } else alerts.filter { it.role == w.role }.map { it.severity }).maxByOrNull { it.ordinal },
-                                        history = if (style == DashStyle.DIGITAL) history.get(w.role) else null,
-                                    )
-                                    Widget(w, data, style, Modifier.weight(w.weight).fillMaxSize())
-                                }
-                            }
-                        }
-                    }
-                }
-                if (maxWidth > maxHeight) {
-                    // Landscape (phone on a car mount): split the template in two columns.
-                    val split = if (rows.first().any { it.kind == WidgetKind.ARC || it.kind == WidgetKind.STACK || it.kind == WidgetKind.MINIMAP }) 1 else (rows.size + 1) / 2
-                    Row(Modifier.fillMaxSize()) {
-                        RowsColumn(rows.take(split), Modifier.weight(1f).fillMaxSize())
-                        RowsColumn(rows.drop(split), Modifier.weight(1.15f).fillMaxSize())
-                    }
-                } else {
-                    RowsColumn(rows, Modifier.fillMaxSize())
-                }
+    val s = snapshot
+    fun value(role: Role): Double? = if (s == null || roles == null) null else valueOf(role, s, roles)
+    fun alertOf(role: Role): Severity? = alerts.filter { it.role == role }.maxByOrNull { it.severity.ordinal }?.severity
+    val frame = HudFrame(
+        value = { value(it) },
+        alert = { alertOf(it) },
+        lambdaTarget = if (s != null) roles?.lambdaTarget(s) else null,
+        launch = launch,
+        pops = pops,
+    )
+
+    @Composable
+    fun Status() = StatusBar(state, log?.rows, launch, pops, onOpenMenu, onOpenSettings, Modifier.fillMaxWidth())
+
+    // Each page draws its own top line, so swiping does not make the layout jump.
+    HorizontalPager(pager, Modifier.fillMaxSize().background(Palette.background)) { page ->
+        when {
+            page == 0 && style == DashStyle.RACING ->
+                RacingHud(frame, state, log?.rows, onOpenMenu, onOpenSettings, Modifier.fillMaxSize())
+            page == 0 -> Column(Modifier.fillMaxSize()) {
+                Status()
+                MainHud(frame, Modifier.weight(1f).fillMaxWidth())
+            }
+            else -> Column(Modifier.fillMaxSize()) {
+                Status()
+                TemplatePage(DashTemplates.all[page - 1].rows, frame, Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
 }
 
-private fun rowWeight(row: List<DashWidget>, style: DashStyle): Float = row.maxOf {
+@Composable
+private fun TemplatePage(rows: List<List<DashWidget>>, frame: HudFrame, modifier: Modifier) {
+    fun dataFor(x: DashWidget): WidgetData {
+        val children = x.stack.map { dataFor(it) }
+        return WidgetData(
+            value = frame.value(x.role),
+            target = if (x.kind == WidgetKind.LAMBDA) frame.lambdaTarget else null,
+            alert = (if (x.kind == WidgetKind.STACK) children.mapNotNull { it.alert } else listOfNotNull(frame.alert(x.role))).maxByOrNull { it.ordinal },
+            children = children,
+        )
+    }
+
+    BoxWithConstraints(modifier.padding(4.dp)) {
+        @Composable
+        fun RowsColumn(part: List<List<DashWidget>>, modifier: Modifier) {
+            Column(modifier) {
+                part.forEach { row ->
+                    Row(Modifier.fillMaxWidth().weight(rowWeight(row))) {
+                        row.forEach { w -> Widget(w, dataFor(w), Modifier.weight(w.weight).fillMaxSize()) }
+                    }
+                }
+            }
+        }
+        if (maxWidth > maxHeight) {
+            // Landscape (phone on a car mount): split the template in two columns.
+            val split = if (rows.first().any { it.kind == WidgetKind.ARC || it.kind == WidgetKind.STACK }) 1 else (rows.size + 1) / 2
+            Row(Modifier.fillMaxSize()) {
+                RowsColumn(rows.take(split), Modifier.weight(1f).fillMaxSize())
+                RowsColumn(rows.drop(split), Modifier.weight(1.15f).fillMaxSize())
+            }
+        } else {
+            RowsColumn(rows, Modifier.fillMaxSize())
+        }
+    }
+}
+
+private fun rowWeight(row: List<DashWidget>): Float = row.maxOf {
     when (it.kind) {
-        WidgetKind.ARC -> if (style == DashStyle.DIGITAL) 1.5f else 1.85f
+        WidgetKind.ARC -> 1.85f
         WidgetKind.LAMBDA -> 0.6f
-        WidgetKind.NUMBER -> if (style == DashStyle.DIGITAL) 1.15f else 1f
+        WidgetKind.NUMBER -> 1f
         WidgetKind.BAR -> 0.6f
-        WidgetKind.STACK, WidgetKind.MINIMAP -> 2.0f
+        WidgetKind.STACK -> 2.0f
     }
 }
 
@@ -182,6 +173,7 @@ private fun StatusBar(
     logRows: Int?,
     launch: dev.turbodash.core.ecu.LaunchState,
     pops: Boolean,
+    onOpenMenu: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier,
 ) {
@@ -194,9 +186,11 @@ private fun StatusBar(
         SessionState.Stopped -> "Desconectado" to Palette.muted
     }
     Row(
-        modifier.clickable(onClick = onOpenSettings).padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier.clickable(onClick = onOpenSettings).padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        MenuButton(onOpenMenu)
+        Spacer(Modifier.width(8.dp))
         Box(Modifier.size(10.dp).clip(CircleShape).background(color))
         Spacer(Modifier.width(8.dp))
         // Launch / pops: a badge takes the place of the connection text (no extra space).
@@ -249,7 +243,7 @@ private fun PopsBadge() {
     )
     Text(
         "POPS",
-        color = androidx.compose.ui.graphics.Color.White,
+        color = Color.White,
         fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp,
         modifier = Modifier
             .alpha(flicker)

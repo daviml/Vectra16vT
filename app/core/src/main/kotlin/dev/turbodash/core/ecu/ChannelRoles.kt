@@ -13,6 +13,8 @@ enum class Role(
     val external: Boolean = false,
 ) {
     SPEED("Velocidade", listOf("gpsSpeed"), external = true),
+    /** Computed in the app from rpm ÷ GPS speed ([GearEstimator]); 0 = no gear. */
+    GEAR("Marcha", listOf("gear"), external = true),
     RPM("RPM", listOf("rpm", "RPM")),
     MAP("MAP", listOf("map", "MAP")),
     BARO("Barômetro", listOf("barometer", "baro")),

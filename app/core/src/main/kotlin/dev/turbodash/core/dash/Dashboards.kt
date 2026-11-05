@@ -13,16 +13,14 @@ enum class WidgetKind {
     LAMBDA,
     /** Several number tiles stacked in one cell ([DashWidget.stack]). */
     STACK,
-    /** Heading-up street mini map from the phone GPS (no ECU channel). */
-    MINIMAP,
 }
 
-/** Visual style of the dashboard; the templates (Rua, Pull...) are the same in every style. */
+/** Look of the main dashboard page; the Diagnóstico page is the same in every style. */
 enum class DashStyle(val label: String) {
-    /** Analog arcs for the main gauges. */
-    GAUGES("Ponteiros"),
-    /** Big numbers with a 30-second trend line in every tile. */
-    DIGITAL("Digital"),
+    /** Giant RPM under a shift light, lambda value and six tiles with fill bars. */
+    MAIN("Principal"),
+    /** Motorsport display: outlined boxes, RPM scale, big gear and indicator lamps. */
+    RACING("Racing"),
 }
 
 /**
@@ -45,6 +43,8 @@ data class DashWidget(
     val units: String = "",
     /** Widgets shown stacked inside a [WidgetKind.STACK] cell. */
     val stack: List<DashWidget> = emptyList(),
+    /** [WidgetKind.STACK] side by side instead of one over the other. */
+    val horizontal: Boolean = false,
 )
 
 data class DashTemplate(val id: String, val name: String, val rows: List<List<DashWidget>>)
@@ -55,14 +55,14 @@ object DashTemplates {
     private val rpm = DashWidget(Role.RPM, WidgetKind.ARC, "RPM", 0.0, 8000.0, warnHigh = 6000.0, dangerHigh = 6800.0, weight = 1.25f)
     private val speed = DashWidget(Role.SPEED, WidgetKind.ARC, "Velocidade", 0.0, 220.0, warnHigh = 160.0, dangerHigh = 190.0, units = "km/h")
     private val map = DashWidget(Role.MAP, WidgetKind.ARC, "MAP", 0.0, 250.0, warnHigh = 180.0, dangerHigh = 210.0, units = "kPa")
-    private val lambda = DashWidget(Role.LAMBDA, WidgetKind.LAMBDA, "Lambda", 0.6, 1.4, digits = 3, weight = 3f)
-    private val clt = DashWidget(Role.CLT, WidgetKind.NUMBER, "Água", 0.0, 120.0, warnHigh = 98.0, dangerHigh = 105.0, units = "°C")
-    private val mat = DashWidget(Role.MAT, WidgetKind.NUMBER, "Ar", 0.0, 100.0, warnHigh = 55.0, dangerHigh = 70.0, units = "°C")
-    private val batt = DashWidget(Role.BATTERY, WidgetKind.NUMBER, "Bateria", 8.0, 16.0, warnLow = 12.0, dangerLow = 11.0, warnHigh = 15.0, dangerHigh = 15.8, digits = 1, units = "V")
-    private val fuel = DashWidget(Role.FUEL_PRESSURE, WidgetKind.NUMBER, "Comb.", 0.0, 6.0, warnLow = 2.5, dangerLow = 2.0, digits = 1, units = "bar")
-    private val tps = DashWidget(Role.TPS, WidgetKind.NUMBER, "TPS", 0.0, 100.0, units = "%")
-    private val adv = DashWidget(Role.ADVANCE, WidgetKind.NUMBER, "Avanço", -10.0, 50.0, digits = 1, units = "°")
-    private val duty = DashWidget(Role.DUTY, WidgetKind.NUMBER, "Duty bico", 0.0, 100.0, warnHigh = 85.0, dangerHigh = 90.0, units = "%")
+    val lambda = DashWidget(Role.LAMBDA, WidgetKind.LAMBDA, "Lambda", 0.6, 1.4, digits = 3, weight = 3f)
+    val clt = DashWidget(Role.CLT, WidgetKind.NUMBER, "Água", 0.0, 120.0, warnHigh = 98.0, dangerHigh = 105.0, units = "°C")
+    val mat = DashWidget(Role.MAT, WidgetKind.NUMBER, "Ar", 0.0, 100.0, warnHigh = 55.0, dangerHigh = 70.0, units = "°C")
+    val batt = DashWidget(Role.BATTERY, WidgetKind.NUMBER, "Bateria", 8.0, 16.0, warnLow = 12.0, dangerLow = 11.0, warnHigh = 15.0, dangerHigh = 15.8, digits = 1, units = "V")
+    val fuel = DashWidget(Role.FUEL_PRESSURE, WidgetKind.NUMBER, "Comb.", 0.0, 6.0, warnLow = 2.5, dangerLow = 2.0, digits = 1, units = "bar")
+    val tps = DashWidget(Role.TPS, WidgetKind.NUMBER, "TPS", 0.0, 100.0, units = "%")
+    val adv = DashWidget(Role.ADVANCE, WidgetKind.NUMBER, "Avanço", -10.0, 50.0, digits = 1, units = "°")
+    val duty = DashWidget(Role.DUTY, WidgetKind.NUMBER, "Duty bico", 0.0, 100.0, warnHigh = 85.0, dangerHigh = 90.0, units = "%")
     private val ego = DashWidget(Role.EGO_CORR, WidgetKind.NUMBER, "Corr. sonda", 50.0, 150.0, warnLow = 85.0, warnHigh = 115.0, dangerLow = 75.0, dangerHigh = 125.0, units = "%")
     private val pw = DashWidget(Role.PULSE_WIDTH, WidgetKind.NUMBER, "Injeção", 0.0, 25.0, digits = 2, units = "ms")
     private val ve = DashWidget(Role.VE, WidgetKind.NUMBER, "VE", 0.0, 150.0, units = "%")
@@ -75,25 +75,18 @@ object DashTemplates {
 
     private fun DashWidget.asNumber() = copy(kind = WidgetKind.NUMBER, weight = 1f)
 
-    private val rpmSpeed = DashWidget(
-        Role.RPM, WidgetKind.STACK, "RPM e velocidade", 0.0, 1.0,
-        stack = listOf(
-            DashWidget(Role.RPM, WidgetKind.NUMBER, "RPM", 0.0, 7000.0, warnHigh = 6000.0, dangerHigh = 6500.0),
-            DashWidget(Role.SPEED, WidgetKind.NUMBER, "Velocidade", 0.0, 160.0, units = "km/h"),
-        ),
-    )
-    private val miniMap = DashWidget(Role.SPEED, WidgetKind.MINIMAP, "Mapa", 0.0, 1.0)
+    // Main page (Principal / Racing styles): same limits as above, scaled for street driving.
+    val mapNumber = map.asNumber()
+    val rpmMain = DashWidget(Role.RPM, WidgetKind.NUMBER, "RPM", 0.0, 7000.0, warnHigh = 6000.0, dangerHigh = 6500.0)
+    val speedMain = DashWidget(Role.SPEED, WidgetKind.NUMBER, "Velocidade", 0.0, 160.0, units = "km/h")
+    val gear = DashWidget(Role.GEAR, WidgetKind.NUMBER, "Marcha", 1.0, 5.0)
 
+    /** Shift light: first LED at [SHIFT_LIGHT_START], all of them flashing from [SHIFT_RPM]. */
+    const val SHIFT_LIGHT_START = 1500.0
+    const val SHIFT_RPM = 6300.0
+
+    /** Pages after the main one (swipe sideways). */
     val all: List<DashTemplate> = listOf(
-        DashTemplate(
-            "rua", "Rua",
-            listOf(
-                listOf(rpmSpeed, miniMap),
-                listOf(lambda),
-                listOf(map.asNumber(), clt, mat),
-                listOf(fuel, batt, tps),
-            ),
-        ),
         DashTemplate(
             "diagnostico", "Diagnóstico",
             listOf(

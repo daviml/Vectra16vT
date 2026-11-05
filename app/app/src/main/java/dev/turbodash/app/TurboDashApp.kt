@@ -10,15 +10,12 @@ class TurboDashApp : Application() {
         private set
     lateinit var sessions: SessionManager
         private set
-    lateinit var nav: dev.turbodash.app.nav.Navigation
-        private set
 
     override fun onCreate() {
         super.onCreate()
         store = ProfileStore(this)
         loadBundledProfile()
         sessions = SessionManager(this, store)
-        nav = dev.turbodash.app.nav.Navigation(this, sessions.gps)
         Thread { runCatching { sessions.refreshProfile() } }.start()
     }
 

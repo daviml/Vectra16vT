@@ -14,8 +14,8 @@ android {
         applicationId = "dev.turbodash.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.4.5"
+        versionCode = 23
+        versionName = "0.5.0"
         // Trial builds: gradlew -PtrialDays=7 ... (0 = no expiry). The build time caps the trial even
         // if the app is reinstalled (first run + days, never past build + 2x days).
         val trialDays = (project.findProperty("trialDays") as String?)?.toIntOrNull() ?: 0

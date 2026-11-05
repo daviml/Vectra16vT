@@ -48,7 +48,7 @@ class ProfileStore(context: Context) {
         set(v) = prefs.edit().putBoolean("autoLog", v).apply()
 
     var dashStyle: DashStyle
-        get() = prefs.getString("dashStyle", null)?.let { n -> DashStyle.entries.firstOrNull { it.name == n } } ?: DashStyle.GAUGES
+        get() = prefs.getString("dashStyle", null)?.let { n -> DashStyle.entries.firstOrNull { it.name == n } } ?: DashStyle.MAIN
         set(v) = prefs.edit().putString("dashStyle", v.name).apply()
 
     var disclaimerAccepted: Boolean

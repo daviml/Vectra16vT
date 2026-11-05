@@ -12,6 +12,8 @@ import dev.turbodash.core.alerts.Alert
 import dev.turbodash.core.ecu.ChannelDecoder
 import dev.turbodash.core.ecu.ChannelRoles
 import dev.turbodash.core.ecu.EcuSession
+import dev.turbodash.core.ecu.GearEstimator
+import dev.turbodash.core.ecu.Role
 import dev.turbodash.core.ecu.SessionState
 import dev.turbodash.core.ecu.Snapshot
 import dev.turbodash.core.ini.DatalogEntry
@@ -81,6 +83,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
 
     private val notifier = AlertNotifier(context)
     val gps = GpsSpeed(context)
+    private val gear = GearEstimator()
     private var session: EcuSession? = null
     private var thread: Thread? = null
     private val logLock = Any()
@@ -200,7 +203,9 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             DatalogEntry(ch.name, friendly[ch.name] ?: ch.name, "float", format, null) to
                 (fixedUnits[ch.name] ?: decoder.unitsOf(ch.name))
         }
-        return listOf(DatalogEntry("gpsSpeed", "GPS Speed", "float", "%.1f", null) to "km/h") + raw
+        // Gear goes last so the older columns keep their positions (analysis scripts use them).
+        return listOf(DatalogEntry("gpsSpeed", "GPS Speed", "float", "%.1f", null) to "km/h") + raw +
+            (DatalogEntry("gear", "Gear", "float", "%d", null) to "")
     }
 
     fun stopLog() {
@@ -232,7 +237,10 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         override fun onFrame(frame: Snapshot, alerts: List<Alert>) {
             if (gen != generation) return
             val speed = gps.current()
-            val snapshot = if (speed == null) frame else Snapshot(frame.time, frame.values + ("gpsSpeed" to speed))
+            val rpm = Role.RPM.candidates.firstNotNullOfOrNull { frame[it] }
+            // Replayed logs carry their own GPS speed.
+            val engaged = gear.update(frame.time, rpm, speed ?: frame["gpsSpeed"]).toDouble()
+            val snapshot = Snapshot(frame.time, frame.values + ("gear" to engaged) + (if (speed == null) emptyMap() else mapOf("gpsSpeed" to speed)))
             _snapshot.value = snapshot
             if (alerts != _alerts.value) _alerts.value = alerts
             notifier.update(alerts)

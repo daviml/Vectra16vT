@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TurboDash HUD opções</title>
+<style>
+  :root {
+    --bg: #0e1116; --surface: #181c24; --surface-high: #222834; --track: #2a3040;
+    --text: #f1f3f5; --muted: #8a94a6; --accent: #e8a33d; --ok: #2ec4b6;
+    --warn: #e8a33d; --danger: #e63946; --info: #4ea8de;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #07090c; color: var(--text); font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  .controls { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; border-bottom: 1px solid #1c2129; }
+  .controls h1 { font-size: 15px; margin: 0 12px 0 0; color: var(--accent); }
+  .group { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .group > span { color: var(--muted); font-size: 12px; margin-right: 4px; }
+  .controls button { background: var(--surface); color: var(--text); border: 1px solid #2a3040; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  .controls button.on { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 700; }
+  .desc { padding: 10px 16px; font-size: 14px; color: #c9d0da; max-width: 900px; line-height: 1.45; }
+  .desc b { color: var(--text); }
+  .desc .pc { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 4px; font-size: 13px; }
+  .desc .pc div::before { font-weight: 700; margin-right: 4px; }
+  .desc .pro::before { content: "+"; color: var(--ok); }
+  .desc .con::before { content: "−"; color: var(--danger); }
+  .stage { padding: 8px 16px 24px; }
+  .frame-wrap { position: relative; }
+  .phone { position: absolute; top: 0; left: 0; transform-origin: 0 0; background: var(--bg); border-radius: 22px; border: 6px solid #2b2f36; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ---------- status line + menu ---------- */
+  .status { height: 30px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 4px; font-size: 12px; }
+  .burger { width: 34px; height: 28px; border: 0; border-radius: 8px; background: rgba(255,255,255,.06); color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .conn { color: var(--ok); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rec { color: var(--danger); font-weight: 700; display: flex; align-items: center; gap: 5px; }
+  .rec::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: pulse .7s infinite alternate; }
+  @keyframes pulse { from { opacity: .3 } to { opacity: 1 } }
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.55); display: none; z-index: 5; }
+  .drawer { position: absolute; top: 0; bottom: 0; left: 0; width: min(260px, 78%); background: var(--surface); z-index: 6; transform: translateX(-102%); transition: transform .2s; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2a3040 transparent; }
+  .menu-open .scrim { display: block; }
+  .menu-open .drawer { transform: none; }
+  .drawer .brand { color: var(--accent); font-weight: 800; letter-spacing: 1px; padding: 4px 12px 12px; }
+  .drawer .item { display: flex; gap: 14px; align-items: center; padding: 11px 12px; border-radius: 22px; color: #d5dbe3; font-size: 15px; cursor: pointer; }
+  .drawer .item.sel { background: #4a3a22; color: var(--text); font-weight: 600; }
+  .drawer .item i { font-style: normal; width: 20px; text-align: center; }
+  .drawer .sep { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; padding: 14px 12px 4px; border-top: 1px solid #2a3040; margin-top: 8px; }
+  .drawer .hudpick { padding: 8px 12px; font-size: 14px; }
+
+  /* ---------- dash body ---------- */
+  .dash { flex: 1; min-height: 0; display: grid; gap: 6px; padding: 4px 6px 6px; }
+  .tile { background: var(--surface); border-radius: 12px; padding: 6px 10px 8px; display: flex; flex-direction: column; min-width: 0; min-height: 0; container-type: size; overflow: hidden; position: relative; }
+  .tile .h { display: flex; justify-content: space-between; align-items: baseline; color: var(--muted); font-size: 13px; white-space: nowrap; flex: none; }
+  .tile .h .u { font-size: 11px; }
+  .tile .v { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: flex-end; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+             font-size: min(62cqh, calc(92cqw / (var(--n, 3) * .62))); }
+  .tile .strip { height: 4px; border-radius: 2px; background: var(--track); flex: none; overflow: hidden; }
+  .tile .strip i { display: block; height: 100%; background: var(--ok); transition: width .08s linear; }
+  .tile.warn { box-shadow: inset 0 0 0 2px var(--warn); }
+  .tile.warn .v { color: var(--warn); }
+  .tile.warn .strip i { background: var(--warn); }
+  .tile.danger { background: #3a1318; box-shadow: inset 0 0 0 2px var(--danger); }
+  .tile.danger .v { color: #ff5c68; }
+  .tile.danger .strip i { background: var(--danger); }
+  .tile.compact .strip { display: none; }
+  .tile.compact .v { font-size: min(70cqh, calc(92cqw / (var(--n, 3) * .62))); }
+
+  /* lambda */
+  .lam { padding: 6px 12px; }
+  .lam .row { flex: 1; min-height: 0; display: flex; align-items: center; gap: 14px; }
+  .lam .barbox { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .lam .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .lam .lbl b { color: var(--accent); font-weight: 600; margin-left: 6px; }
+  .lam .bar { position: relative; height: 14px; border-radius: 7px; background: linear-gradient(90deg, #2c6e9e, #2a4a5a 45%, #4a2a33 70%, #a3333d); }
+  .lam .tgt { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--accent); border-radius: 2px; }
+  .lam .dot { position: absolute; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--ok); border: 3px solid #0e1116; transition: left .08s linear; }
+  .lam .lv { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ok); font-size: min(70cqh, 22cqw); line-height: 1; }
+  .lam.warn .lv { color: var(--warn); } .lam.danger .lv { color: #ff5c68; }
+
+  .tile.center .v { justify-content: center; }
+  .lamval .h { position: absolute; top: 6px; left: 10px; }
+  .lamval .v { justify-content: center; color: var(--ok); font-size: min(64cqh, 24cqw) !important; }
+  .lamval .tg { flex: none; text-align: center; color: var(--accent); font-size: 12px; font-weight: 600; }
+
+  /* racing display (option G) */
+  .phone.racing { background: #000; }
+  .racing .status { display: none; }
+  .race { flex: 1; min-height: 0; display: grid; gap: 16px 8px; padding: 8px 10px 8px; color: #fff; font-family: "Segoe UI", Tahoma, Roboto, sans-serif; }
+  .rb { border: 2px solid #e6e6e6; position: relative; container-type: size; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+  .rb .lb { position: absolute; top: 0; left: 50%; transform: translate(-50%, -58%); background: #000; padding: 0 6px; font-size: 15px; line-height: 1; white-space: nowrap; }
+  .rb .v { font-size: min(64cqh, calc(88cqw / (var(--n, 3) * .6))); font-weight: 500; line-height: 1; margin-top: 4%; font-variant-numeric: tabular-nums; }
+  .rb .tg { font-size: 12px; color: #aaa; margin-top: 2px; }
+  .rb.dbl { outline: 2px solid #e6e6e6; outline-offset: 3px; }
+  .rb.gearbox .v { font-size: min(82cqh, 80cqw); font-weight: 400; }
+  .rb.c-y { border-color: #e8d83a; } .rb.c-b { border-color: #9fc6e4; } .rb.c-r { border-color: #d63a3a; } .rb.c-g { border-color: #2f8f3c; }
+  .rb.warn { border-color: var(--warn); outline-color: var(--warn); } .rb.warn .v, .rb.warn .lb { color: var(--warn); }
+  .rb.danger { border-color: #ff2a2a; outline-color: #ff2a2a; background: #2a0000; } .rb.danger .v, .rb.danger .lb { color: #ff2a2a; }
+  .rsub { display: grid; gap: 16px 8px; grid-template-columns: repeat(6, 1fr); grid-template-rows: 1fr 1fr; grid-template-areas: 't t v v u u' 'f f f b b b'; min-height: 0; padding-top: 2px; }
+  .rscale { display: flex; flex-direction: column; gap: 3px; padding: 0 12px; min-height: 0; }
+  .rscale .nums { position: relative; flex: 1; }
+  .rscale .nums span { position: absolute; bottom: 8px; transform: translateX(-50%); font-weight: 700; font-size: 16px; line-height: 1; }
+  .rtrack { position: relative; height: 52%; border-left: 2px solid #fff; }
+  .rtrack i { position: absolute; left: 0; top: 0; bottom: 0; background: #2f8fe8; transition: width .08s linear; }
+  .rtrack i.a { background: var(--accent); } .rtrack i.r { background: #ff2a2a; animation: pulse .12s infinite alternate; }
+  .rtrack::after { content: ""; position: absolute; inset: -6px 0 0 0; background: linear-gradient(90deg, transparent calc(100% - 2px), #fff 0) 0 0 / calc(100% / 7) 100%; pointer-events: none; }
+  .rlamps { border: 2px solid #e6e6e6; display: flex; align-items: center; gap: 6px; padding: 0 6px; min-width: 0; overflow: hidden; }
+  .rlamps .burger { flex: none; color: #ccc; }
+  .rbrand { font-style: italic; font-weight: 900; font-size: 13px; color: #bbb; margin-right: auto; white-space: nowrap; }
+  .lp { border: 1.5px solid #333; color: #3d3d3d; border-radius: 4px; padding: 2px 5px; font-size: 11px; font-weight: 800; letter-spacing: .5px; white-space: nowrap; }
+  .lp.on.a { background: var(--accent); border-color: var(--accent); color: #000; }
+  .lp.on.r { background: #ff2a2a; border-color: #ff2a2a; color: #fff; }
+  .lp.blink { animation: pulse .15s infinite alternate; }
+  .lp.rec-lp { border-color: #ff2a2a; color: #ff2a2a; }
+  .rconn { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ok); white-space: nowrap; }
+  .rconn i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .race.port .rbrand, .race.port .rconn { display: none; }
+  .race.port .lp { margin-left: auto; padding: 2px 3px; font-size: 10px; letter-spacing: 0; } .race.port .lp ~ .lp { margin-left: 0; }
+  .race.port .rlamps { gap: 4px; padding: 0 4px; }
+
+  /* LED shift light */
+  .leds { display: flex; gap: 4px; padding: 2px 4px; align-items: stretch; }
+  .leds i { flex: 1; border-radius: 4px; background: #1d222b; }
+  .leds i.g.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .leds i.a.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .leds i.r.on { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+  .leds.shift i { background: var(--danger) !important; animation: pulse .12s infinite alternate; }
+  /* RPM inside big tile (option B) */
+  .bigrpm .foot { display: flex; justify-content: space-between; align-items: baseline; flex: none; font-variant-numeric: tabular-nums; }
+  .bigrpm .foot b { font-size: min(18cqh, 16cqw); }
+  .bigrpm .foot small { color: var(--muted); font-size: 14px; margin-left: 4px; }
+  .bigrpm .v { font-size: min(64cqh, 36cqw) !important; justify-content: center; }
+
+  /* segment bar (option C) */
+  .seg { display: flex; align-items: center; gap: 10px; padding: 4px 8px; background: var(--surface); border-radius: 12px; container-type: size; }
+  .seg .cells { flex: 1; height: 70%; display: flex; gap: 2px; }
+  .seg .cells i { flex: 1; background: #1d222b; border-radius: 2px; }
+  .seg .cells i.on { background: var(--ok); }
+  .seg .cells i.on.a { background: var(--accent); }
+  .seg .cells i.on.r { background: var(--danger); }
+  .seg .rpmv { font-weight: 800; font-variant-numeric: tabular-nums; font-size: min(62cqh, 40px); min-width: 3.1em; text-align: right; }
+  .seg.shift .cells i { background: var(--danger); animation: pulse .12s infinite alternate; }
+  .gear .v { justify-content: center !important; font-size: min(86cqh, 80cqw) !important; color: var(--accent); }
+
+  /* table (option D) */
+  .table { display: grid; gap: 0 14px; padding: 2px 10px 8px; flex: 1; min-height: 0; }
+  .trow { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #1c212a; min-height: 0; container-type: size; padding: 0 6px; border-radius: 6px; }
+  .trow .n { color: var(--muted); font-size: min(34cqh, 16px); flex: 1; white-space: nowrap; }
+  .trow .v { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-weight: 700; font-size: min(70cqh, 40px); font-variant-numeric: tabular-nums; }
+  .trow .u { color: var(--muted); font-size: min(30cqh, 13px); width: 34px; }
+  .trow.warn { background: rgba(232,163,61,.14); } .trow.warn .v { color: var(--warn); }
+  .trow.danger { background: rgba(230,57,70,.25); } .trow.danger .v { color: #ff5c68; }
+
+  /* alert area (option E) */
+  .alerts { background: transparent; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .alerts .calm { flex: 1; border: 1px dashed #2a3040; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; gap: 4px; }
+  .alerts .calm b { color: var(--ok); font-size: 18px; }
+  .alerts .card { flex: 1; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; container-type: size; min-height: 0; }
+  .alerts .card.warn { background: rgba(232,163,61,.18); border: 2px solid var(--warn); color: var(--warn); }
+  .alerts .card.danger { background: #3a1318; border: 2px solid var(--danger); color: #ff5c68; animation: pulse .5s infinite alternate; }
+  .alerts .card .n { font-size: min(26cqh, 22px); font-weight: 700; color: var(--text); }
+  .alerts .card .n small { display: block; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
+  .alerts .card .v { font-size: min(70cqh, 90px); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  /* windshield HUD (option F) */
+  .phone.hudmode { background: #000; }
+  .phone.hudmode .status { opacity: .35; }
+  .hud { flex: 1; min-height: 0; display: grid; gap: 4px; padding: 6px 10px 10px; color: #00ffd0; }
+  .hud.mirror { transform: scaleX(-1); }
+  .hud .box { container-type: size; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; min-width: 0; }
+  .hud .big { font-size: min(80cqh, 52cqw); font-weight: 800; line-height: .9; font-variant-numeric: tabular-nums; }
+  .hud .mid { font-size: min(62cqh, 40cqw); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .hud .cap { font-size: min(14cqh, 18px); letter-spacing: 2px; opacity: .8; }
+  .hud .rbar { display: flex; gap: 3px; height: 100%; width: 100%; }
+  .hud .rbar i { flex: 1; border: 1px solid #00ffd055; border-radius: 2px; }
+  .hud .rbar i.on { background: #00ffd0; } .hud .rbar i.on.a { background: #ffd000; } .hud .rbar i.on.r { background: #ff2040; }
+  .hud .warn { color: #ffd000; } .hud .danger { color: #ff2040; }
+  .hud .alert { color: #ff2040; font-weight: 800; letter-spacing: 1px; font-size: min(60cqh, 26cqw); }
+</style>
+</head>
+<body>
+<div class="controls">
+  <h1>TurboDash · HUD</h1>
+  <div class="group" id="opts"><span>Opção</span></div>
+  <div class="group" id="orient"><span>Celular</span></div>
+  <div class="group" id="phase"><span>Simulação</span></div>
+  <div class="group" id="mirror" hidden><span>F</span></div>
+</div>
+<div class="desc" id="desc"></div>
+<div class="stage" id="stage"><div class="frame-wrap" id="wrap"><div class="phone" id="phone"></div></div></div>
+
+<script>
+// ---------- channels (limits from core/dash/Dashboards.kt) ----------
+const CH = {
+  rpm:   { t: 'RPM', u: '', min: 0, max: 7000, wh: 6000, dh: 6500, d: 0, n: 4 },
+  speed: { t: 'Veloc.', u: 'km/h', min: 0, max: 160, d: 0, n: 3 },
+  gear:  { t: 'Marcha', u: '', min: 0, max: 5, d: 0, n: 1 },
+  lambda:{ t: 'Lambda', u: 'λ', min: .6, max: 1.4, d: 3, n: 5 },
+  map:   { t: 'MAP', u: 'kPa', min: 0, max: 250, wh: 180, dh: 210, d: 0, n: 3 },
+  clt:   { t: 'Água', u: '°C', min: 0, max: 120, wh: 98, dh: 105, d: 0, n: 3 },
+  mat:   { t: 'Ar', u: '°C', min: 0, max: 100, wh: 55, dh: 70, d: 0, n: 3 },
+  fuel:  { t: 'Comb.', u: 'bar', min: 0, max: 6, wl: 2.5, dl: 2.0, d: 1, n: 3 },
+  batt:  { t: 'Bateria', u: 'V', min: 8, max: 16, wl: 12, dl: 11, wh: 15, dh: 15.8, d: 1, n: 3.5 },
+  tps:   { t: 'TPS', u: '%', min: 0, max: 100, d: 0, n: 3 },
+  adv:   { t: 'Avanço', u: '°', min: -10, max: 50, d: 1, n: 4 },
+  duty:  { t: 'Duty bico', u: '%', min: 0, max: 100, wh: 85, dh: 90, d: 0, n: 3 },
+  ego:   { t: 'Corr. sonda', u: '%', min: 50, max: 150, wl: 85, wh: 115, dl: 75, dh: 125, d: 0, n: 3 },
+  pw:    { t: 'Injeção', u: 'ms', min: 0, max: 25, d: 2, n: 5 },
+};
+
+function sev(k, v) {
+  const c = CH[k];
+  if (k === 'lambda') { const dv = Math.abs(v - S.target); return dv > .1 ? 'danger' : dv > .05 ? 'warn' : ''; }
+  if ((c.dh != null && v >= c.dh) || (c.dl != null && v <= c.dl)) return 'danger';
+  if ((c.wh != null && v >= c.wh) || (c.wl != null && v <= c.wl)) return 'warn';
+  return '';
+}
+function fmt(k, v) { return k === 'gear' ? (v > 0 ? String(v) : 'N') : v.toFixed(CH[k].d); }
+const frac = (k, v) => Math.max(0, Math.min(1, (v - CH[k].min) / (CH[k].max - CH[k].min)));
+
+// ---------- simulation: idle -> pull 1ª-4ª -> cruise with water heating ----------
+const RATIO = [0, 7.5, 13.5, 19.5, 26, 32];
+let S = {}, rec = 8188, phaseMode = 'auto';
+function simulate(t) {
+  let p = t % 24;
+  if (phaseMode === 'idle') p = t % 5;
+  if (phaseMode === 'pull') p = 5 + t % 7;
+  if (phaseMode === 'hot') p = 12 + t % 12;
+  const w = Math.sin(t * 3), w2 = Math.sin(t * 1.7);
+  if (p < 5) {
+    S = { rpm: 900 + 40 * w, speed: 0, gear: 0, map: 26 + 2 * w2, tps: 1, lambda: 1.0 + .015 * w2, target: .98,
+          clt: 84, mat: 36, fuel: 2.65, batt: 14.4 + .05 * w, adv: 14 + w, duty: 4, ego: 101 + 2 * w, pw: 2.4 };
+  } else if (p < 12) {
+    const q = p - 5, gear = Math.min(4, Math.floor(q / 1.75) + 1), g = (q % 1.75) / 1.75;
+    const rpm = 2800 + 3800 * g;
+    S = { rpm, speed: rpm / 1000 * RATIO[gear], gear, map: 115 + 75 * g, tps: 100, lambda: .83 + .012 * w, target: .82,
+          clt: 86, mat: 40 + q, fuel: 2.62 - .3 * g, batt: 14.2, adv: 16 - 4 * g, duty: 38 + 52 * g, ego: 100, pw: 7 + 7 * g };
+  } else {
+    const q = p - 12;
+    S = { rpm: 2400 + 40 * w, speed: 62 + w2, gear: 4, map: 45 + 3 * w, tps: 12, lambda: .98 + .02 * w2, target: .98,
+          clt: 86 + q * 1.8, mat: 44, fuel: 2.6, batt: 14.3, adv: 30 + w, duty: 12, ego: 103 + 3 * w, pw: 3.8 };
+  }
+  S.gear = Math.round(S.gear);
+  // Launch held just before the pull; pops right after lifting off at the end of it.
+  S.launch = p >= 3.6 && p < 5 ? (p >= 4.2 ? 'active' : 'armed') : '';
+  S.pops = p >= 12 && p < 12.8;
+  rec += 1;
+}
+
+// ---------- building blocks ----------
+const tile = (k, area, cls = '') =>
+  `<div class="tile ${cls}" data-ch="${k}" style="grid-area:${area};--n:${CH[k].n}">
+     <div class="h"><span>${CH[k].t}</span><span class="u">${CH[k].u}</span></div>
+     <div class="v" data-v="${k}"></div><div class="strip"><i data-f="${k}"></i></div></div>`;
+const lam = area =>
+  `<div class="tile lam" data-ch="lambda" style="grid-area:${area}"><div class="row">
+     <div class="barbox"><div class="lbl"><span>Lambda<b data-target></b></span><span>rico ◂▸ pobre</span></div>
+     <div class="bar"><i class="tgt" data-tgt></i><i class="dot" data-dot></i></div></div>
+     <div class="lv" data-v="lambda"></div></div></div>`;
+const leds = area => `<div class="leds" data-leds style="grid-area:${area}">${
+  Array.from({ length: 15 }, (_, i) => `<i class="${i < 9 ? 'g' : i < 13 ? 'a' : 'r'}"></i>`).join('')}</div>`;
+const seg = area => `<div class="seg" data-seg style="grid-area:${area}"><div class="cells">${
+  Array.from({ length: 32 }, (_, i) => `<i class="${i < 22 ? '' : i < 28 ? 'a' : 'r'}"></i>`).join('')}</div><div class="rpmv" data-v="rpm"></div></div>`;
+const grid = (cols, rows, areas, body) =>
+  `<div class="dash" style="grid-template-columns:${cols};grid-template-rows:${rows};grid-template-areas:${areas.map(a => `'${a}'`).join(' ')}">${body}</div>`;
+
+// ---------- options ----------
+const OPTS = {
+  A: {
+    name: 'Grade limpa',
+    desc: 'O painel de hoje sem o mapa: RPM ganha a largura toda, velocidade e marcha embaixo, lambda e os 6 tiles. Números maiores e a barra com bolinha vira uma faixa fina.',
+    pro: ['Menor mudança no app', 'Você já conhece a posição de tudo'], con: ['Ainda é "um monte de quadradinho"'],
+    portrait: () => grid('repeat(6,1fr)', '2.1fr 1.3fr .8fr 1.15fr 1.15fr',
+      ['r r r r r r', 's s s g g g', 'l l l l l l', 'a a b b c c', 'd d e e f f'],
+      tile('rpm', 'r') + tile('speed', 's') + tile('gear', 'g') + lam('l') +
+      tile('map', 'a') + tile('clt', 'b') + tile('mat', 'c') + tile('fuel', 'd') + tile('batt', 'e') + tile('tps', 'f')),
+    landscape: () => grid('1.25fr .75fr 1fr 1fr 1fr', '.75fr 1.1fr 1.1fr',
+      ['r r l l l', 'r r a b c', 's g d e f'],
+      tile('rpm', 'r') + tile('speed', 's') + tile('gear', 'g') + lam('l') +
+      tile('map', 'a') + tile('clt', 'b') + tile('mat', 'c') + tile('fuel', 'd') + tile('batt', 'e') + tile('tps', 'f')),
+  },
+  B: {
+    name: 'RPM gigante',
+    desc: 'Shift light de LEDs no topo (verde → âmbar → vermelho, pisca na troca). RPM enorme com velocidade e marcha no rodapé do mesmo quadro. Secundários compactos, só número.',
+    pro: ['RPM e troca de marcha legíveis de canto de olho', 'Shift light ajuda nas puxadas'], con: ['Secundários menores que hoje'],
+    portrait: () => grid('repeat(3,1fr)', '.28fr 2.8fr .85fr 1fr 1fr',
+      ['k k k', 'r r r', 'l l l', 'a b c', 'd e f'],
+      leds('k') + bigRpm('r') + lam('l') +
+      tile('map', 'a', 'compact') + tile('clt', 'b', 'compact') + tile('mat', 'c', 'compact') +
+      tile('fuel', 'd', 'compact') + tile('batt', 'e', 'compact') + tile('tps', 'f', 'compact')),
+    landscape: () => grid('1.5fr 1fr 1fr 1fr', '.2fr .8fr 1fr 1fr',
+      ['k k k k', 'r l l l', 'r a b c', 'r d e f'],
+      leds('k') + bigRpm('r') + lam('l') +
+      tile('map', 'a', 'compact') + tile('clt', 'b', 'compact') + tile('mat', 'c', 'compact') +
+      tile('fuel', 'd', 'compact') + tile('batt', 'e', 'compact') + tile('tps', 'f', 'compact')),
+  },
+  B2: {
+    name: 'RPM gigante (ajustada)',
+    desc: 'A opção B com os seus ajustes: secundários com a barrinha enchendo (sem bolinha), igual à A, números centralizados, e lambda sem barra: valor grande no meio e o alvo pequeno embaixo.',
+    pro: ['Shift light + RPM enorme da B', 'Barrinha mostra quanto falta para o limite'], con: ['Lambda sem barra: rico/pobre só pela cor do número'],
+    portrait: () => grid('repeat(3,1fr)', '.28fr 2.5fr 1.05fr 1.15fr 1.15fr',
+      ['k k k', 'r r r', 'l l l', 'a b c', 'd e f'],
+      leds('k') + bigRpm('r') + lamValue('l') +
+      tile('map', 'a', 'center') + tile('clt', 'b', 'center') + tile('mat', 'c', 'center') +
+      tile('fuel', 'd', 'center') + tile('batt', 'e', 'center') + tile('tps', 'f', 'center')),
+    landscape: () => grid('1.5fr 1fr 1fr 1fr', '.2fr .9fr 1fr 1fr',
+      ['k k k k', 'r l l l', 'r a b c', 'r d e f'],
+      leds('k') + bigRpm('r') + lamValue('l') +
+      tile('map', 'a', 'center') + tile('clt', 'b', 'center') + tile('mat', 'c', 'center') +
+      tile('fuel', 'd', 'center') + tile('batt', 'e', 'center') + tile('tps', 'f', 'center')),
+  },
+  C: {
+    name: 'Corrida',
+    desc: 'Barra de RPM em segmentos na largura toda com o número na ponta. Marcha gigante no centro, velocidade e lambda ao lado. Só 4 secundários (os que protegem o motor).',
+    pro: ['Visual de painel de corrida', 'Marcha e RPM sem precisar ler número'], con: ['Ar e TPS saem da tela principal (ficam no Diagnóstico)'],
+    portrait: () => grid('1fr 1fr', '.55fr 2.3fr 1.3fr .8fr 1.1fr 1.1fr',
+      ['k k', 'g g', 's s', 'l l', 'a b', 'd e'],
+      seg('k') + tile('gear', 'g', 'gear compact') + tile('speed', 's') + lam('l') +
+      tile('map', 'a') + tile('clt', 'b') + tile('fuel', 'd') + tile('batt', 'e')),
+    landscape: () => grid('1fr 1fr .9fr 1fr', '.42fr 1.9fr .9fr',
+      ['k k k k', 's s g l2', 'a b d e'],
+      seg('k') + tile('speed', 's') + tile('gear', 'g', 'gear compact') + lamNum('l2') +
+      tile('map', 'a') + tile('clt', 'b') + tile('fuel', 'd') + tile('batt', 'e')),
+  },
+  D: {
+    name: 'Tabela densa',
+    desc: 'Lista "nome ……… valor unidade" em fonte mono, 14 canais. Linha inteira fica âmbar/vermelha no alerta. Boa para a página Diagnóstico ou para acerto de mapa.',
+    pro: ['Muita informação, alinhada e fácil de comparar', 'Ótima no horizontal (2 colunas)'], con: ['Pior para olhar rápido dirigindo'],
+    portrait: () => table(1),
+    landscape: () => table(2),
+  },
+  E: {
+    name: 'Foco em alerta',
+    desc: 'Na tela só RPM, velocidade, marcha e lambda. Os outros canais ficam vigiados em silêncio: quando um sai da faixa, aparece um cartão grande (âmbar ou vermelho piscando).',
+    pro: ['Tela mais calma', 'Alerta impossível de não ver'], con: ['Não dá para "acompanhar" a água subir antes do alerta'],
+    portrait: () => grid('1fr 1fr', '2fr 1.2fr .8fr 2.4fr',
+      ['r r', 's g', 'l l', 'x x'],
+      tile('rpm', 'r') + tile('speed', 's') + tile('gear', 'g') + lam('l') + `<div class="alerts" data-alerts style="grid-area:x"></div>`),
+    landscape: () => grid('1fr .6fr 1.6fr', '1.4fr 1fr .8fr',
+      ['r r x', 's g x', 'l l x'],
+      tile('rpm', 'r') + tile('speed', 's') + tile('gear', 'g') + lam('l') + `<div class="alerts" data-alerts style="grid-area:x"></div>`),
+  },
+  F: {
+    name: 'HUD para-brisa',
+    desc: 'Fundo preto puro, cores neon, texto espelhado: celular deitado no painel reflete no vidro. Só velocidade, marcha, RPM e lambda; alerta aparece em vermelho. Desligue "espelhado" para ler aqui.',
+    pro: ['Olho fica na rua', 'Funciona à noite muito bem'], con: ['De dia o reflexo some', 'Precisa de suporte deitado no painel'],
+    portrait: () => hud(false),
+    landscape: () => hud(true),
+  },
+  G: {
+    name: 'Racing',
+    desc: 'Estilo display de carro de corrida: fundo preto, caixas com contorno fino e o nome na borda, escala de RPM 0–7 no topo (azul → âmbar → vermelho piscando na troca), marcha gigante no centro. Lambda na caixa de destaque com borda dupla. Embaixo, luzes de LAUNCH, POPS, água, combustível, bateria e REC. Só canais que a ECU já manda.',
+    pro: ['Visual de corrida, muita informação sem poluir', 'Luzes de LAUNCH/POPS e alertas sempre no mesmo lugar'], con: ['Números um pouco menores que na B2', 'Pensado para o horizontal'],
+    portrait: () => racing(false),
+    landscape: () => racing(true),
+  },
+};
+
+// ---------- option G (racing display) ----------
+const rbox = (k, area, cls = '', extra = '') =>
+  `<div class="rb ${cls}" data-ch="${k}" style="grid-area:${area};--n:${CH[k].n}"><span class="lb">${CH[k].t}</span><div class="v" data-v="${k}"></div>${extra}</div>`;
+function racing(land) {
+  const scale = `<div class="rscale" style="grid-area:k"><div class="nums">${
+    Array.from({ length: 8 }, (_, i) => `<span style="left:${i / 7 * 100}%">${i}</span>`).join('')}</div>
+    <div class="rtrack"><i data-rfill></i></div></div>`;
+  const sub = `<div class="rsub" style="grid-area:x">
+    ${rbox('tps', 't', 'c-y')}${rbox('adv', 'v', 'c-b')}${rbox('duty', 'u', 'c-r')}${rbox('fuel', 'f', 'c-g')}${rbox('batt', 'b')}</div>`;
+  const lamps = `<div class="rlamps" style="grid-area:z">
+    <button class="burger" data-menu title="Menu">☰</button><b class="rbrand">TURBODASH</b>
+    <span class="lp" data-lamp="launch">LAUNCH</span><span class="lp" data-lamp="pops">POPS</span>
+    <span class="lp" data-lamp="clt">ÁGUA</span><span class="lp" data-lamp="fuel">COMB</span><span class="lp" data-lamp="batt">BAT</span>
+    <span class="rconn"><i></i>13 Hz</span><span class="lp rec-lp on" data-rec></span></div>`;
+  const body = scale + rbox('clt', 'w') + rbox('mat', 'a') +
+    rbox('lambda', 'l', 'dbl', '<div class="tg" data-target></div>') + rbox('speed', 's') +
+    rbox('map', 'm') + rbox('gear', 'g', 'gearbox') + rbox('rpm', 'r') + sub + lamps;
+  const cols = land ? '1fr 1fr 1.3fr 2fr' : '1fr 1fr 1fr';
+  const rows = land ? '.5fr 1fr 1fr 1fr .42fr' : '.42fr .95fr 1fr 1.05fr 1.05fr 1.9fr .32fr';
+  const areas = land ? ['k k k k', 'w a l s', 'm m g x', 'r r g x', 'z z z z']
+                     : ['k k k', 'w a s', 'l l l', 'm g g', 'r g g', 'x x x', 'z z z'];
+  return `<div class="race ${land ? '' : 'port'}" style="grid-template-columns:${cols};grid-template-rows:${rows};grid-template-areas:${areas.map(x => `'${x}'`).join(' ')}">${body}</div>`;
+}
+
+function bigRpm(area) {
+  return `<div class="tile bigrpm" data-ch="rpm" style="grid-area:${area};--n:4">
+    <div class="h"><span>RPM</span><span class="u">x1</span></div>
+    <div class="v" data-v="rpm"></div>
+    <div class="foot"><span><b data-v="speed"></b><small>km/h</small></span><span><b data-v="gear"></b><small>marcha</small></span></div></div>`;
+}
+function lamNum(area) {
+  return `<div class="tile" data-ch="lambda" style="grid-area:${area};--n:5">
+    <div class="h"><span>Lambda</span><span class="u" data-target></span></div><div class="v" data-v="lambda"></div><div class="strip"><i data-f="lambda"></i></div></div>`;
+}
+// Lambda as a plain value: big number centered, target small underneath, no bar.
+function lamValue(area) {
+  return `<div class="tile lamval" data-ch="lambda" style="grid-area:${area}">
+    <div class="h"><span>Lambda</span></div><div class="v" data-v="lambda"></div><div class="tg" data-target></div></div>`;
+}
+function table(cols) {
+  const keys = ['rpm', 'speed', 'gear', 'lambda', 'map', 'clt', 'mat', 'fuel', 'batt', 'tps', 'adv', 'duty', 'ego', 'pw'];
+  const rows = Math.ceil(keys.length / cols);
+  return `<div class="table" style="grid-template-columns:repeat(${cols},1fr);grid-template-rows:repeat(${rows},1fr);grid-auto-flow:column">${
+    keys.map(k => `<div class="trow" data-ch="${k}"><span class="n">${CH[k].t}</span><span class="v" data-v="${k}"></span><span class="u">${CH[k].u}</span></div>`).join('')}</div>`;
+}
+function hud(land) {
+  const bar = `<div class="box" style="grid-area:b"><div class="rbar" data-rbar>${
+    Array.from({ length: 24 }, (_, i) => `<i class="${i < 16 ? '' : i < 21 ? 'a' : 'r'}"></i>`).join('')}</div></div>`;
+  const sp = `<div class="box" style="grid-area:s"><div class="big" data-v="speed"></div><div class="cap">KM/H</div></div>`;
+  const g = `<div class="box" style="grid-area:g"><div class="mid" data-v="gear"></div><div class="cap">MARCHA</div></div>`;
+  const r = `<div class="box" style="grid-area:r"><div class="mid" data-v="rpm"></div><div class="cap">RPM</div></div>`;
+  const l = `<div class="box" style="grid-area:l"><div class="mid" data-v="lambda" data-hudsev="lambda"></div><div class="cap">LAMBDA</div></div>`;
+  const a = `<div class="box" style="grid-area:a"><div class="alert" data-hudalert></div></div>`;
+  const areas = land ? ['s s g r', 's s l l', 'a a a a', 'b b b b'] : ['s s', 'g r', 'l l', 'a a', 'b b'];
+  const rows = land ? '1.3fr 1.1fr .45fr .35fr' : '2.6fr 1fr 1fr .5fr .35fr';
+  return `<div class="hud ${mirror ? 'mirror' : ''}" style="grid-template-columns:repeat(${land ? 4 : 2},1fr);grid-template-rows:${rows};grid-template-areas:${areas.map(x => `'${x}'`).join(' ')}">${sp + g + r + l + a + bar}</div>`;
+}
+
+// ---------- page state ----------
+let opt = 'G', land = false, mirror = true, menu = false;
+const phone = document.getElementById('phone');
+
+function render() {
+  const o = OPTS[opt];
+  phone.className = 'phone' + (opt === 'F' ? ' hudmode' : '') + (opt === 'G' ? ' racing' : '') + (menu ? ' menu-open' : '');
+  phone.innerHTML = `
+    <div class="status"><button class="burger" data-menu title="Menu">☰</button><span class="conn-dot"></span>
+      <span class="conn">MS2Extra MegaSpeed • 13 Hz</span><span class="rec" data-rec></span></div>
+    ${land ? o.landscape() : o.portrait()}
+    <div class="scrim" data-close></div>
+    <nav class="drawer"><div class="brand">TURBODASH</div>
+      <div class="item sel" data-close><i>⌂</i>Painel</div><div class="item" data-close><i>▦</i>Mapas</div>
+      <div class="item" data-close><i>≣</i>Logs</div><div class="item" data-close><i>⚙</i>Ajustes</div>
+      <div class="sep">Estilo do painel</div>
+      ${Object.entries(OPTS).map(([k, v]) => `<div class="item hudpick ${k === opt ? 'sel' : ''}" data-pick="${k}"><i>${k}</i>${v.name}</div>`).join('')}
+    </nav>`;
+  document.getElementById('desc').innerHTML =
+    `<b>${opt} — ${o.name}.</b> ${o.desc}<div class="pc">${o.pro.map(x => `<div class="pro">${x}</div>`).join('')}${o.con.map(x => `<div class="con">${x}</div>`).join('')}</div>`;
+  document.getElementById('mirror').hidden = opt !== 'F';
+  buttons();
+  fit();
+  update();
+}
+
+phone.addEventListener('click', e => {
+  if (e.target.closest('[data-menu]')) { menu = true; phone.classList.add('menu-open'); }
+  else if (e.target.closest('[data-pick]')) { opt = e.target.closest('[data-pick]').dataset.pick; menu = false; render(); }
+  else if (e.target.closest('[data-close]')) { menu = false; phone.classList.remove('menu-open'); }
+});
+
+function buttons() {
+  const mk = (id, items, cur, set) => {
+    const g = document.getElementById(id);
+    g.querySelectorAll('button').forEach(b => b.remove());
+    items.forEach(([k, label]) => {
+      const b = document.createElement('button');
+      b.textContent = label; b.className = k === cur ? 'on' : '';
+      b.onclick = () => { set(k); render(); };
+      g.appendChild(b);
+    });
+  };
+  mk('opts', Object.entries(OPTS).map(([k, v]) => [k, `${k} · ${v.name}`]), opt, k => { opt = k; });
+  mk('orient', [[false, 'Vertical'], [true, 'Horizontal']], land, k => { land = k; });
+  mk('phase', [['auto', 'Auto'], ['idle', 'Lenta'], ['pull', 'Puxada'], ['hot', 'Água esquentando']], phaseMode, k => { phaseMode = k; });
+  mk('mirror', [[true, 'Espelhado'], [false, 'Normal']], mirror, k => { mirror = k; });
+}
+
+// Phone sized like a real one (390 × 844 css px), scaled down to fit the window.
+function fit() {
+  const W = land ? 844 : 390, H = land ? 390 : 844;
+  const stage = document.getElementById('stage'), wrap = document.getElementById('wrap');
+  const avail = stage.clientWidth - 32, top = stage.getBoundingClientRect().top;
+  const scale = Math.min(1, avail / (W + 12), Math.max(.35, (innerHeight - top - 30) / (H + 12)));
+  phone.style.width = W + 12 + 'px'; phone.style.height = H + 12 + 'px';
+  phone.style.transform = `scale(${scale})`;
+  wrap.style.width = (W + 12) * scale + 'px'; wrap.style.height = (H + 12) * scale + 'px';
+}
+addEventListener('resize', fit);
+
+// ---------- live update ----------
+function update() {
+  phone.querySelectorAll('[data-v]').forEach(el => { const k = el.dataset.v; el.textContent = fmt(k, S[k]); });
+  phone.querySelectorAll('[data-f]').forEach(el => { const k = el.dataset.f; el.style.width = frac(k, S[k]) * 100 + '%'; });
+  phone.querySelectorAll('[data-ch]').forEach(el => {
+    const s = sev(el.dataset.ch, S[el.dataset.ch]);
+    el.classList.toggle('warn', s === 'warn'); el.classList.toggle('danger', s === 'danger');
+  });
+  phone.querySelectorAll('[data-target]').forEach(el => el.textContent = 'alvo ' + S.target.toFixed(2));
+  phone.querySelectorAll('[data-tgt]').forEach(el => el.style.left = frac('lambda', S.target) * 100 + '%');
+  phone.querySelectorAll('[data-dot]').forEach(el => el.style.left = frac('lambda', S.lambda) * 100 + '%');
+  phone.querySelectorAll('[data-rec]').forEach(el => el.textContent = 'REC ' + rec);
+  const shift = S.rpm >= 6300;
+  phone.querySelectorAll('[data-leds]').forEach(el => {
+    el.classList.toggle('shift', shift);
+    el.querySelectorAll('i').forEach((i, n) => i.classList.toggle('on', S.rpm >= 1500 + n * 340));
+  });
+  phone.querySelectorAll('[data-seg]').forEach(el => {
+    el.classList.toggle('shift', shift);
+    el.querySelectorAll('i').forEach((i, n) => i.classList.toggle('on', S.rpm >= (n + 1) * 7000 / 32));
+  });
+  phone.querySelectorAll('[data-rbar]').forEach(el =>
+    el.querySelectorAll('i').forEach((i, n) => i.classList.toggle('on', S.rpm >= (n + 1) * 7000 / 24)));
+  const bad = ['map', 'clt', 'mat', 'fuel', 'batt', 'duty', 'ego'].map(k => [k, sev(k, S[k])]).filter(x => x[1])
+    .sort((a, b) => (b[1] === 'danger') - (a[1] === 'danger'));
+  phone.querySelectorAll('[data-alerts]').forEach(el => {
+    el.innerHTML = bad.length
+      ? bad.map(([k, s]) => {
+          const c = CH[k], high = (c.wh != null && S[k] >= c.wh);
+          return `<div class="card ${s}"><div class="n">${c.t}<small>${high ? 'ALTO' : 'BAIXO'}</small></div><div class="v">${fmt(k, S[k])}<small style="font-size:.35em"> ${c.u}</small></div></div>`;
+        }).join('')
+      : `<div class="calm"><b>✓ Tudo normal</b>água, ar, MAP, combustível, bateria, duty e sonda vigiados</div>`;
+  });
+  phone.querySelectorAll('[data-rfill]').forEach(el => {
+    el.style.width = Math.min(1, S.rpm / 7000) * 100 + '%';
+    el.className = S.rpm >= 6300 ? 'r' : S.rpm >= 6000 ? 'a' : '';
+  });
+  const lamp = { launch: S.launch === 'active' ? 'a blink' : S.launch ? 'a' : '', pops: S.pops ? 'r blink' : '',
+    clt: sev('clt', S.clt), fuel: sev('fuel', S.fuel), batt: sev('batt', S.batt) };
+  phone.querySelectorAll('[data-lamp]').forEach(el => {
+    const v = lamp[el.dataset.lamp], c = v === 'warn' ? 'a' : v === 'danger' ? 'r blink' : v;
+    el.className = 'lp' + (c ? ' on ' + c : '');
+  });
+  phone.querySelectorAll('[data-hudsev]').forEach(el => { const s = sev('lambda', S.lambda); el.className = 'mid ' + s; });
+  phone.querySelectorAll('[data-hudalert]').forEach(el =>
+    el.textContent = bad.length ? bad.map(([k]) => `${CH[k].t.toUpperCase()} ${fmt(k, S[k])}`).join(' · ') : '');
+}
+
+const t0 = performance.now();
+setInterval(() => { simulate((performance.now() - t0) / 1000); update(); }, 80);
+simulate(0);
+render();
+</script>
+</body>
+</html>
