@@ -15,6 +15,13 @@ enum class Role(
     SPEED("Velocidade", listOf("gpsSpeed"), external = true),
     /** Computed in the app from rpm ÷ GPS speed ([GearEstimator]); 0 = no gear. */
     GEAR("Marcha", listOf("gear"), external = true),
+    /** Computed in the app from the injectors ([FuelEconomy]). */
+    FUEL_RATE("Consumo l/h", listOf("fuelLph"), external = true),
+    /** Instant km/l; absent when stopped or in fuel cut. */
+    FUEL_ECONOMY("Consumo", listOf("fuelKmpl"), external = true),
+    /** 1 while the engine turns with the injectors closed. */
+    FUEL_CUT("Cutoff", listOf("fuelCut"), external = true),
+    TRIP_ECONOMY("Média da viagem", listOf("tripKmpl"), external = true),
     RPM("RPM", listOf("rpm", "RPM")),
     MAP("MAP", listOf("map", "MAP")),
     BARO("Barômetro", listOf("barometer", "baro")),

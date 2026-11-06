@@ -32,10 +32,10 @@ object DashIcons {
         "M6.5 7.5V5.3h3v2.2M14.5 7.5V5.3h3v2.2",
         "M6.4 13.5h3.2M8 11.9v3.2M14.4 13.5h3.2",
     )
-    val pedal = icon(
-        "M9.2 3.6l6.6 1.4a1.6 1.6 0 0 1 1.2 1.9l-2.6 11.6a1.6 1.6 0 0 1 -1.9 1.2L5.9 18.3a1.6 1.6 0 0 1 -1.2 -1.9L7.3 4.8a1.6 1.6 0 0 1 1.9 -1.2Z",
-        "M8.6 8.2l6 1.3M7.9 11.4l6 1.3M7.2 14.6l6 1.3",
-        "M4 21.5h16",
+    /** A drop with motion lines: fuel being used. */
+    val consumption = icon(
+        "M15.5 4.5C15.5 4.5 10.8 9.8 10.8 13.1A4.7 4.7 0 0 0 20.2 13.1C20.2 9.8 15.5 4.5 15.5 4.5Z",
+        "M2.8 10.5h4.6M2 14h5.2M2.8 17.5h4.8",
     )
 
     private fun icon(vararg paths: String): ImageVector =

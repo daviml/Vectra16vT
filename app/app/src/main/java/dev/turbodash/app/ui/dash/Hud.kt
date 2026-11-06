@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -141,7 +143,10 @@ fun MainHud(f: HudFrame, modifier: Modifier) {
             Column(m) {
                 rows.forEach { row ->
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        row.forEach { w -> MainTile(w, f.value(w.role), f.alert(w.role), Modifier.weight(1f).fillMaxHeight()) }
+                        row.forEach { w ->
+                            val m = Modifier.weight(1f).fillMaxHeight()
+                            if (w.role == Role.FUEL_ECONOMY) FuelTile(f, m) else MainTile(w, f.value(w.role), f.alert(w.role), m)
+                        }
                     }
                 }
             }
@@ -153,7 +158,7 @@ fun MainHud(f: HudFrame, modifier: Modifier) {
                     BigRpm(f, Modifier.weight(1.5f).fillMaxHeight())
                     Column(Modifier.weight(3f).fillMaxHeight()) {
                         LambdaValue(f, Modifier.weight(0.9f).fillMaxWidth())
-                        Tiles(listOf(listOf(T.clt, T.mat, T.mapNumber), listOf(T.fuel, T.batt, T.tps)), Modifier.weight(2f).fillMaxWidth())
+                        Tiles(listOf(listOf(T.clt, T.mat, T.mapNumber), listOf(T.fuel, T.batt, T.fuelEconomy)), Modifier.weight(2f).fillMaxWidth())
                     }
                 }
             }
@@ -163,7 +168,7 @@ fun MainHud(f: HudFrame, modifier: Modifier) {
                 BigRpm(f, Modifier.weight(1.72f).fillMaxWidth())
                 LambdaValue(f, Modifier.weight(0.95f).fillMaxWidth())
                 Tiles(
-                    listOf(listOf(T.clt, T.mat), listOf(T.mapNumber, T.tps), listOf(T.fuel, T.batt)),
+                    listOf(listOf(T.clt, T.mat), listOf(T.mapNumber, T.fuelEconomy), listOf(T.fuel, T.batt)),
                     Modifier.weight(3.45f).fillMaxWidth(),
                 )
             }
@@ -250,22 +255,26 @@ private val tileLooks = mapOf(
     Role.MAP to TileLook(DashIcons.gauge, Color(0xFFF28CB1), "250"),
     Role.FUEL_PRESSURE to TileLook(DashIcons.fuel, Color(0xFF5BD17A), "6.0"),
     Role.BATTERY to TileLook(DashIcons.battery, Color(0xFFA78BFA), "14.5"),
-    Role.TPS to TileLook(DashIcons.pedal, Color(0xFFE0C79A), "100"),
+    Role.FUEL_ECONOMY to TileLook(DashIcons.consumption, Color(0xFFE0C79A), "99.9"),
 )
 
 /**
- * Main-page tile: name with its colored icon, the number sized for the widest value the tile can
- * show (so it doesn't jump in size), a fill bar in the tile's color and the icon large and faint
- * behind it all. The number stays white: amber and red are kept for alerts.
+ * Main-page tile frame: name with its colored icon and units, and the icon large and faint behind
+ * the content ([background] recolors it, for alerts).
  */
 @Composable
-private fun MainTile(w: DashWidget, value: Double?, alert: Severity?, modifier: Modifier) {
-    val look = tileLooks.getValue(w.role)
-    val level = levelColor(w, value)
-    val alarm = level == Palette.warn || level == Palette.danger
+private fun TileShell(
+    look: TileLook,
+    title: String,
+    units: String,
+    alert: Severity?,
+    background: Color,
+    modifier: Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Box(modifier.tileFrame(alert)) {
         Icon(
-            look.icon, contentDescription = null, tint = (if (alarm) level else look.color).copy(alpha = 0.10f),
+            look.icon, contentDescription = null, tint = background.copy(alpha = 0.10f),
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(0.92f).aspectRatio(1f)
                 .graphicsLayer { translationX = size.width * 0.12f },
         )
@@ -273,17 +282,57 @@ private fun MainTile(w: DashWidget, value: Double?, alert: Severity?, modifier: 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(look.icon, contentDescription = null, tint = look.color, modifier = Modifier.size(17.dp))
                 Text(
-                    w.title, color = Palette.muted, fontSize = 15.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium,
+                    title, color = Palette.muted, fontSize = 15.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, modifier = Modifier.weight(1f).padding(start = 5.dp),
                 )
-                if (w.units.isNotEmpty()) Text(w.units, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 1)
+                if (units.isNotEmpty()) Text(units, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 1)
             }
-            FitNumber(
-                fmt(value, w.digits), level, Modifier.weight(1f).fillMaxWidth(),
-                minChars = 1f, heightFraction = 1.25f, widest = look.widest, tight = true,
-            )
-            FillBar(w, value, Modifier.fillMaxWidth().height(5.dp), normal = look.color)
+            content()
         }
+    }
+}
+
+/**
+ * Main-page tile: the number sized for the widest value the tile can show (so it doesn't jump in
+ * size) and a fill bar in the tile's color. The number stays white: amber and red are for alerts.
+ */
+@Composable
+private fun MainTile(w: DashWidget, value: Double?, alert: Severity?, modifier: Modifier) {
+    val look = tileLooks.getValue(w.role)
+    val level = levelColor(w, value)
+    val alarm = level == Palette.warn || level == Palette.danger
+    TileShell(look, w.title, w.units, alert, if (alarm) level else look.color, modifier) {
+        FitNumber(
+            fmt(value, w.digits), level, Modifier.weight(1f).fillMaxWidth(),
+            minChars = 1f, heightFraction = 1.25f, widest = look.widest, tight = true,
+        )
+        FillBar(w, value, Modifier.fillMaxWidth().height(5.dp), normal = look.color)
+    }
+}
+
+/**
+ * Trip computer, like a factory one: km/l while moving, l/h when stopped (idle), CUTOFF in green
+ * while the injectors are closed, and the trip average (since connecting) under it.
+ */
+@Composable
+private fun FuelTile(f: HudFrame, modifier: Modifier) {
+    val look = tileLooks.getValue(Role.FUEL_ECONOMY)
+    val kml = f.value(Role.FUEL_ECONOMY)
+    val cutoff = f.value(Role.FUEL_CUT) == 1.0
+    val (text, units) = when {
+        cutoff -> "CUTOFF" to ""
+        kml != null -> fmt(kml, 1) to "km/l"
+        else -> fmt(f.value(Role.FUEL_RATE), 1) to "l/h"
+    }
+    TileShell(look, "Consumo", units, null, look.color, modifier) {
+        FitNumber(
+            text, if (cutoff) Palette.ok else Palette.text, Modifier.weight(1f).fillMaxWidth(),
+            minChars = 1f, heightFraction = 1.25f, widest = if (cutoff) "CUTOFFX" else look.widest, tight = true,
+        )
+        Text(
+            "média ${fmt(f.value(Role.TRIP_ECONOMY), 1)} km/l", color = Palette.muted, fontSize = 13.sp, lineHeight = 13.sp,
+            maxLines = 1, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+        )
     }
 }
 

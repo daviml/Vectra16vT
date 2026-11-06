@@ -12,6 +12,7 @@ import dev.turbodash.core.alerts.Alert
 import dev.turbodash.core.ecu.ChannelDecoder
 import dev.turbodash.core.ecu.ChannelRoles
 import dev.turbodash.core.ecu.EcuSession
+import dev.turbodash.core.ecu.FuelEconomy
 import dev.turbodash.core.ecu.GearEstimator
 import dev.turbodash.core.ecu.Role
 import dev.turbodash.core.ecu.SessionState
@@ -84,6 +85,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
     private val notifier = AlertNotifier(context)
     val gps = GpsSpeed(context)
     private val gear = GearEstimator()
+    private val fuel = FuelEconomy()
     private var session: EcuSession? = null
     private var thread: Thread? = null
     private val logLock = Any()
@@ -135,6 +137,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         )
         session = s
         autoLogged = false
+        fuel.reset()
         _state.value = SessionState.Connecting(1) // immediate feedback on the button press
         thread = Thread({ s.run() }, "ecu-session").apply { start() }
         android.os.Handler(android.os.Looper.getMainLooper()).post { gps.acquire() }
@@ -206,9 +209,11 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             DatalogEntry(ch.name, friendly[ch.name] ?: ch.name, "float", format, null) to
                 (fixedUnits[ch.name] ?: decoder.unitsOf(ch.name))
         }
-        // Gear goes last so the older columns keep their positions (analysis scripts use them).
+        // Gear and fuel use go last so the older columns keep their positions (analysis scripts use them).
         return listOf(DatalogEntry("gpsSpeed", "GPS Speed", "float", "%.1f", null) to "km/h") + raw +
-            (DatalogEntry("gear", "Gear", "float", "%d", null) to "")
+            (DatalogEntry("gear", "Gear", "float", "%d", null) to "") +
+            (DatalogEntry("fuelLph", "Fuel Rate", "float", "%.2f", null) to "l/h") +
+            (DatalogEntry("tripKmpl", "Trip Economy", "float", "%.1f", null) to "km/l")
     }
 
     fun stopLog() = closeLog(keepShort = true)
@@ -248,6 +253,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             } else {
                 autoLogged = false
                 closeLog(keepShort = false)
+                fuel.reset() // the trip average follows the log: one per connection
             }
         }
 
@@ -259,10 +265,24 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         override fun onFrame(frame: Snapshot, alerts: List<Alert>) {
             if (gen != generation) return
             val speed = gps.current()
-            val rpm = Role.RPM.candidates.firstNotNullOfOrNull { frame[it] }
+            fun of(role: Role) = role.candidates.firstNotNullOfOrNull { frame[it] }
+            val rpm = of(Role.RPM)
             // Replayed logs carry their own GPS speed.
-            val engaged = gear.update(frame.time, rpm, speed ?: frame["gpsSpeed"]).toDouble()
-            val snapshot = Snapshot(frame.time, frame.values + ("gear" to engaged) + (if (speed == null) emptyMap() else mapOf("gpsSpeed" to speed)))
+            val kmh = speed ?: frame["gpsSpeed"]
+            val engaged = gear.update(frame.time, rpm, kmh).toDouble()
+            val use = fuel.update(
+                frame.time, rpm, of(Role.PULSE_WIDTH), of(Role.DUTY), of(Role.BATTERY), of(Role.FUEL_PRESSURE), of(Role.MAP), kmh,
+            )
+            val fuelValues = buildMap {
+                put("fuelLph", use.litersPerHour)
+                put("fuelCut", if (use.cutoff) 1.0 else 0.0)
+                use.kmPerLiter?.let { put("fuelKmpl", it) }
+                use.tripKmPerLiter?.let { put("tripKmpl", it) }
+            }
+            val snapshot = Snapshot(
+                frame.time,
+                frame.values + ("gear" to engaged) + fuelValues + (if (speed == null) emptyMap() else mapOf("gpsSpeed" to speed)),
+            )
             _snapshot.value = snapshot
             if (alerts != _alerts.value) _alerts.value = alerts
             notifier.update(alerts)

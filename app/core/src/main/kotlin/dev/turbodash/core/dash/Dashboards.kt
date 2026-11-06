@@ -80,6 +80,8 @@ object DashTemplates {
     val rpmMain = DashWidget(Role.RPM, WidgetKind.NUMBER, "RPM", 0.0, 7000.0, warnHigh = 6000.0, dangerHigh = 6500.0)
     val speedMain = DashWidget(Role.SPEED, WidgetKind.NUMBER, "Velocidade", 0.0, 160.0, units = "km/h")
     val gear = DashWidget(Role.GEAR, WidgetKind.NUMBER, "Marcha", 1.0, 5.0)
+    /** Trip-computer tile: km/l moving, l/h stopped, CUTOFF with the injectors closed. */
+    val fuelEconomy = DashWidget(Role.FUEL_ECONOMY, WidgetKind.NUMBER, "Consumo", 0.0, 20.0, digits = 1, units = "km/l")
 
     /** Shift point: the RPM bar flashes red from here. */
     const val SHIFT_RPM = 6300.0
