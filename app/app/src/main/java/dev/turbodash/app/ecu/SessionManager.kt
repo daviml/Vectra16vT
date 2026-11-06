@@ -89,6 +89,8 @@ class SessionManager(private val context: Context, private val store: ProfileSto
     private val logLock = Any()
     private var writer: MslWriter? = null
     private var marks = 0
+    // Auto log already started on this link: "Parar" keeps it stopped until the next connection.
+    @Volatile private var autoLogged = false
 
     val isActive get() = session != null
 
@@ -132,6 +134,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             ini, opener, fallbackTune = msqTune, listener = sessionListener(++generation), alertConfig = store.alertConfig,
         )
         session = s
+        autoLogged = false
         _state.value = SessionState.Connecting(1) // immediate feedback on the button press
         thread = Thread({ s.run() }, "ecu-session").apply { start() }
         android.os.Handler(android.os.Looper.getMainLooper()).post { gps.acquire() }
@@ -146,7 +149,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         s.stop()
         thread?.join(3000)
         thread = null
-        stopLog()
+        closeLog(keepShort = false)
         android.os.Handler(android.os.Looper.getMainLooper()).post { gps.release() }
         notifier.clear()
         _alerts.value = emptyList()
@@ -208,11 +211,20 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             (DatalogEntry("gear", "Gear", "float", "%d", null) to "")
     }
 
-    fun stopLog() {
+    fun stopLog() = closeLog(keepShort = true)
+
+    /**
+     * Closes the current log. Unless [keepShort], one under [MIN_LOG_ROWS] rows (a link that
+     * dropped right after connecting) is deleted so the list doesn't fill with empty files.
+     */
+    private fun closeLog(keepShort: Boolean) {
         synchronized(logLock) {
-            writer?.close()
+            val w = writer ?: return
+            w.close()
             writer = null
+            val status = _log.value
             _log.value = null
+            if (!keepShort && status != null && status.rows < MIN_LOG_ROWS) status.file.delete()
         }
     }
 
@@ -226,7 +238,17 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         override fun onState(state: SessionState) {
             if (gen != generation) return
             _state.value = state
-            if (state is SessionState.Running && store.autoLog && writer == null && _tune.value != null) startLog()
+            // One log per connection: it opens when data starts flowing and closes as soon as the
+            // link drops (car off, out of range), so the next connection starts a new file.
+            if (state is SessionState.Running) {
+                if (!autoLogged && store.autoLog && _tune.value != null) {
+                    autoLogged = true
+                    startLog()
+                }
+            } else {
+                autoLogged = false
+                closeLog(keepShort = false)
+            }
         }
 
         override fun onTune(tune: Tune, fromEcu: Boolean) {
@@ -260,4 +282,9 @@ class SessionManager(private val context: Context, private val store: ProfileSto
     }
 
     fun roles(): ChannelRoles? = _ini.value?.let { ChannelRoles(it) }
+
+    private companion object {
+        /** About 2 s of data at 14 Hz: shorter logs from a link that dropped are thrown away. */
+        const val MIN_LOG_ROWS = 30
+    }
 }

@@ -201,7 +201,7 @@ fun SettingsScreen(store: ProfileStore, sessions: SessionManager) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 var auto by remember { mutableStateOf(store.autoLog) }
                 Switch(auto, onCheckedChange = { auto = it; store.autoLog = it })
-                Text("  Gravar log automaticamente ao conectar")
+                Text("  Gravar log automaticamente (um por conexão)")
             }
         }
 

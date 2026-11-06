@@ -143,10 +143,10 @@ fun NumberTile(w: DashWidget, value: Double?, modifier: Modifier, centered: Bool
     }
 }
 
-/** Thin bar filled from the minimum up to the value, in the value's level color. */
+/** Thin bar filled from the minimum up to the value, in the value's level color ([normal] when fine). */
 @Composable
-fun FillBar(w: DashWidget, value: Double?, modifier: Modifier) {
-    val color = levelColor(w, value).let { if (it == Palette.text) Palette.ok else it }
+fun FillBar(w: DashWidget, value: Double?, modifier: Modifier, normal: Color = Palette.ok) {
+    val color = levelColor(w, value).let { if (it == Palette.text) normal else it }
     Canvas(modifier) {
         val r = CornerRadius(size.height / 2)
         drawRoundRect(Palette.track, cornerRadius = r)

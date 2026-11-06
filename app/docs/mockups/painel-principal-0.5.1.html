@@ -1,0 +1,342 @@
+<title>TurboDash Painel Novo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap">
+<style>
+/* Layout: barra de opções no topo, dois celulares lado a lado (Hoje × Proposta) que empilham no celular. Cores = Theme.kt/Brand.kt do app. */
+:root {
+  --bg: #0E1116; --surface: #171B22; --surface-high: #1F252E; --track: #2B323D;
+  --text: #F1F3F5; --muted: #8A94A6; --accent: #FF9F1C; --ok: #2EC4B6;
+  --warn: #FFBF00; --danger: #E63946; --info: #4EA8DE;
+  --page: #080A0E; --line: #262C36;
+  --c-map: #F28CB1; --c-clt: #4EA8DE; --c-mat: #C3CCDA; --c-fuel: #5BD17A; --c-batt: #A78BFA; --c-tps: #E0C79A;
+  --font: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+html, body { background: var(--page); color: var(--text); font-family: var(--font); }
+body { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 40px; }
+h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; text-wrap: balance; }
+.lead { color: var(--muted); margin: 0 0 16px; max-width: 70ch; line-height: 1.5; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 20px; align-items: center; }
+.group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.group > span { color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; margin-right: 2px; }
+button.chip { font: 500 13px var(--font); color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+button.chip[aria-pressed="true"] { color: #0E1116; background: var(--ok); border-color: var(--ok); }
+button.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.phones { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.col h2 { font-size: 14px; font-weight: 500; color: var(--muted); margin: 0; letter-spacing: .04em; text-transform: uppercase; }
+.col h2 b { color: var(--text); font-weight: 700; }
+.frame { position: relative; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); }
+.screen { position: absolute; top: 0; left: 0; width: 390px; height: 800px; transform-origin: 0 0; background: var(--bg); display: flex; flex-direction: column; }
+.notes { max-width: 70ch; color: var(--muted); line-height: 1.55; margin-top: 24px; }
+.notes b { color: var(--text); }
+
+/* ---------- tela ---------- */
+.status { height: 46px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 8px; font-size: 15px; }
+.menu { width: 36px; height: 30px; border-radius: 8px; background: rgba(255,255,255,.06); display: grid; place-items: center; }
+.menu i { display: block; width: 16px; height: 2px; background: var(--muted); box-shadow: 0 -5px 0 var(--muted), 0 5px 0 var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+.conn { color: var(--ok); flex: 1; white-space: nowrap; }
+.rec { color: var(--danger); font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.rec::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }
+.body { flex: 1; display: flex; flex-direction: column; padding: 4px; min-height: 0; }
+.w { flex-basis: 0; min-height: 0; }
+.shift { display: flex; gap: 4px; padding: 3px 4px; }
+.shift i { flex: 1; border-radius: 4px; background: var(--surface); }
+.shift i.g { background: var(--ok); } .shift i.a { background: var(--warn); } .shift i.r { background: var(--danger); }
+.rpmbar { margin: 3px 4px; border-radius: 5px; position: relative; overflow: hidden;
+  background:
+    repeating-linear-gradient(to right, transparent 0 calc(100% / 7 - 1px), rgba(255,255,255,.10) calc(100% / 7 - 1px) calc(100% / 7)),
+    linear-gradient(to right, var(--surface) 0 85.714%, color-mix(in srgb, var(--warn) 22%, var(--surface)) 85.714% 90%, color-mix(in srgb, var(--danger) 28%, var(--surface)) 90%); }
+.rpmbar .fill { position: absolute; inset: 0; background: linear-gradient(to right, var(--ok) 0 85.714%, var(--warn) 85.714% 90%, var(--danger) 90%);
+  clip-path: inset(0 calc(100% - var(--p, 0%)) 0 0); transition: clip-path 80ms linear; }
+.rpmbar.shift .fill { background: var(--danger); animation: flash 240ms ease-in-out infinite alternate; }
+@keyframes flash { from { opacity: 1 } to { opacity: .35 } }
+.rpmctl { display: flex; align-items: center; gap: 10px; }
+.rpmctl input { width: 200px; accent-color: var(--ok); }
+.rpmctl output { font: 700 14px var(--font); font-variant-numeric: tabular-nums; width: 46px; }
+.tile { margin: 3px; border-radius: 12px; background: var(--surface); position: relative; overflow: hidden; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.tile.warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); box-shadow: inset 0 0 0 2px var(--warn); }
+.tile.danger { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); box-shadow: inset 0 0 0 2px var(--danger); }
+.lbl { color: var(--muted); font-size: 13px; line-height: 13px; }
+.numbox { flex: 1; display: grid; place-items: center; min-height: 0; overflow: hidden; }
+.num { font-weight: 700; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.foot { display: flex; align-items: baseline; }
+.foot .v { font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.foot .u { color: var(--muted); margin-left: 6px; }
+.foot .sp { flex: 1; }
+.alvo { color: var(--accent); font-size: 12px; font-weight: 600; text-align: center; line-height: 12px; }
+.grid { display: flex; flex-direction: column; }
+.row { display: flex; flex: 1; min-height: 0; }
+.row .tile { flex: 1; }
+.trow { display: flex; align-items: center; gap: 5px; }
+.trow .t { flex: 1; color: var(--muted); white-space: nowrap; }
+.trow .un { color: var(--muted); opacity: .7; }
+.bar { height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; flex: none; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--ok); }
+
+/* Hoje: cópia do app atual */
+.old .tile { padding: 6px 10px; }
+.old .trow .t { font-size: 14px; } .old .trow .un { font-size: 12px; }
+
+/* Proposta */
+.new .tile.big { padding: 6px 14px 8px; }
+.new .tile.big .lbl { position: absolute; top: 8px; left: 14px; }
+.new .tile.big .numbox { padding-top: 4px; }
+.new .num { line-height: .78; }
+.new .tile.small { padding: 7px 10px 8px; }
+.new .trow .t { font-size: 15px; font-weight: 500; letter-spacing: .01em; }
+.new .trow .un { font-size: 13px; }
+.new .trow svg { width: 17px; height: 17px; flex: none; }
+.bgicon { position: absolute; pointer-events: none; opacity: .10; right: -8%; top: 50%; transform: translateY(-46%); height: 92%; width: auto; }
+.new.noBg .bgicon { display: none; }
+.new.noLabelIcon .trow svg { display: none; }
+.ico { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+
+<h1>Painel Principal — Hoje × Proposta</h1>
+<p class="lead">Mesmas cores e fontes do app. Os botões mudam só o lado da proposta; "Valores" muda os dois, pra ver se nada estoura.</p>
+
+<div class="controls">
+  <div class="group"><span>Valores</span>
+    <button class="chip" id="v-print" aria-pressed="true" data-vals="print">do print</button>
+    <button class="chip" id="v-alert" aria-pressed="false" data-vals="alert">com alerta</button>
+    <button class="chip" id="v-max" aria-pressed="false" data-vals="max">extremos</button>
+  </div>
+  <div class="group rpmctl"><span>Rotação</span>
+    <input type="range" id="rpm" min="0" max="7000" step="10" aria-label="Rotação">
+    <output id="rpm-out" for="rpm"></output>
+    <button class="chip" id="rev" aria-pressed="false">dar uma acelerada</button>
+  </div>
+  <div class="group"><span>Quadros</span>
+    <button class="chip" id="g-2" aria-pressed="true" data-cols="2">2 colunas</button>
+    <button class="chip" id="g-3" aria-pressed="false" data-cols="3">3 colunas</button>
+  </div>
+  <div class="group"><span>Identificação</span>
+    <button class="chip" id="t-bg" aria-pressed="true" data-toggle="noBg">ícone no fundo</button>
+    <button class="chip" id="t-li" aria-pressed="true" data-toggle="noLabelIcon">ícone no nome</button>
+    <button class="chip" id="t-color" aria-pressed="true" data-toggle="noColor">cor por quadro</button>
+  </div>
+</div>
+
+<div class="phones">
+  <div class="col"><h2><b>Hoje</b> · como está no app</h2><div class="frame"><div class="screen old" id="old"></div></div></div>
+  <div class="col"><h2><b>Proposta</b></h2><div class="frame"><div class="screen new" id="new"></div></div></div>
+</div>
+
+<div class="notes">
+  <p><b>Barra de rotação:</b> contínua de 0 a 7000, então a lenta (~900) já aparece com 13% da barra. Verde até 6000, âmbar até 6300 (troca de marcha), vermelho depois disso; passando de 6300 a barra inteira pisca em vermelho. O fundo já mostra onde começam as faixas âmbar e vermelha, e tem uma marquinha a cada 1000 rpm.</p>
+  <p><b>RPM:</b> o número fica do mesmo tamanho, o quadro perde o vazio de cima e de baixo. Velocidade e marcha passam de 44 para 60 px.</p>
+  <p><b>Quadros de baixo:</b> em 3 colunas o número é limitado pela largura do quadro, então quase não cresce. Em 2 colunas × 3 linhas ele fica bem maior. Cada quadro reserva espaço para o maior valor que pode mostrar (ex.: 14.5 V, 105 °C), assim o tamanho do número não muda com o valor.</p>
+  <p><b>Identificação:</b> ícone grande e apagado no fundo, ícone pequeno colorido ao lado do nome e a barrinha na cor do quadro. O número continua branco: vermelho e âmbar ficam só para alerta.</p>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-clt" viewBox="0 0 24 24"><path d="M12 2.8C12 2.8 5.2 10.4 5.2 15A6.8 6.8 0 0 0 18.8 15C18.8 10.4 12 2.8 12 2.8Z"/><path d="M8.6 15.6c1.1.9 2.3.9 3.4 0s2.3-.9 3.4 0"/></symbol>
+  <symbol id="i-mat" viewBox="0 0 24 24"><path d="M3 8.5h10.5a3 3 0 1 0-3-3"/><path d="M3 12.5h15a3 3 0 1 1-3 3"/><path d="M3 16.5h6.5"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M4.3 17.5a8.6 8.6 0 1 1 15.4 0"/><path d="M12 14.3l4.3-5"/><circle cx="12" cy="14.3" r="1.5"/><path d="M6.4 11.6l1.2.5M12 6.4v1.3M17.6 11.6l-1.2.5"/></symbol>
+  <symbol id="i-fuel" viewBox="0 0 24 24"><path d="M5 20.5V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15.5"/><path d="M3.5 20.5h13"/><rect x="7.5" y="6.5" width="5" height="4" rx=".8"/><path d="M15 9.5h1.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 0 3 0V8.2L18.5 5.7"/></symbol>
+  <symbol id="i-batt" viewBox="0 0 24 24"><rect x="2.8" y="7.5" width="18.4" height="12" rx="2"/><path d="M6.5 7.5V5.3h3v2.2M14.5 7.5V5.3h3v2.2"/><path d="M6.4 13.5h3.2M8 11.9v3.2M14.4 13.5h3.2"/></symbol>
+  <symbol id="i-tps" viewBox="0 0 24 24"><path d="M9.2 3.6l6.6 1.4a1.6 1.6 0 0 1 1.2 1.9l-2.6 11.6a1.6 1.6 0 0 1-1.9 1.2L5.9 18.3a1.6 1.6 0 0 1-1.2-1.9L7.3 4.8a1.6 1.6 0 0 1 1.9-1.2Z"/><path d="M8.6 8.2l6 1.3M7.9 11.4l6 1.3M7.2 14.6l6 1.3"/><path d="M4 21.5h16"/></symbol>
+</svg>
+
+<script>
+const SHIFT = 6300, START = 1500;
+const VALS = {
+  print: { rpm: 1803, spd: 25, gear: 2, lam: 0.959, tgt: 0.98, map: 30, clt: 49, mat: 30, fuel: 2.7, batt: 14.5, tps: 9 },
+  alert: { rpm: 3240, spd: 72, gear: 3, lam: 0.912, tgt: 0.90, map: 88, clt: 106, mat: 41, fuel: 2.4, batt: 13.9, tps: 38 },
+  max:   { rpm: 6880, spd: 188, gear: 5, lam: 0.815, tgt: 0.80, map: 250, clt: 98, mat: 70, fuel: 5.8, batt: 14.5, tps: 100 },
+};
+// Limites iguais aos DashWidget do app (Dashboards.kt); ref = maior texto que o quadro pode mostrar.
+const TILES = {
+  map:  { t: "MAP", u: "kPa", min: 0, max: 250, d: 0, ref: "250" },
+  clt:  { t: "Água", u: "°C", min: 0, max: 120, d: 0, wh: 98, dh: 105, ref: "120" },
+  mat:  { t: "Ar", u: "°C", min: 0, max: 100, d: 0, wh: 55, dh: 70, ref: "100" },
+  fuel: { t: "Comb.", u: "bar", min: 0, max: 6, d: 1, wl: 2.5, dl: 2.0, ref: "6.0" },
+  batt: { t: "Bateria", u: "V", min: 8, max: 16, d: 1, wl: 12, dl: 11, wh: 15, dh: 15.8, ref: "14.5" },
+  tps:  { t: "TPS", u: "%", min: 0, max: 100, d: 0, ref: "100" },
+};
+const OLD_ORDER = [["map", "clt", "mat"], ["fuel", "batt", "tps"]];
+const NEW_ORDER = { 2: [["clt", "mat"], ["map", "tps"], ["fuel", "batt"]], 3: [["clt", "mat", "map"], ["fuel", "batt", "tps"]] };
+
+let state = { vals: "print", cols: 2, noBg: false, noLabelIcon: false, noColor: false };
+try { Object.assign(state, JSON.parse(localStorage.getItem("painel-mockup") || "{}")); } catch (e) {}
+
+function level(k, v) {
+  const w = TILES[k];
+  if ((w.dh != null && v >= w.dh) || (w.dl != null && v <= w.dl)) return "danger";
+  if ((w.wh != null && v >= w.wh) || (w.wl != null && v <= w.wl)) return "warn";
+  return "";
+}
+const colorOf = lv => lv === "danger" ? "var(--danger)" : lv === "warn" ? "var(--warn)" : "var(--text)";
+const lamColor = (v, t) => Math.abs(v - t) <= 0.03 ? "var(--ok)" : v < t ? "var(--info)" : "var(--danger)";
+const fmt = (v, d) => v.toFixed(d);
+
+function shiftLeds(rpm) {
+  let s = "";
+  for (let i = 0; i < 15; i++) {
+    const on = rpm >= START + i * (SHIFT - START) / 15;
+    const c = rpm >= SHIFT ? "r" : !on ? "" : i < 9 ? "g" : i < 13 ? "a" : "r";
+    s += `<i class="${c}"></i>`;
+  }
+  return s;
+}
+
+function status() {
+  return `<div class="status"><div class="menu"><i></i></div><span class="dot"></span><span class="conn">MS2Extra MegaSpeed • 14 Hz</span><span class="rec">REC 2656</span></div>`;
+}
+
+function renderOld(v) {
+  const tile = k => {
+    const w = TILES[k], val = v[k], lv = level(k, val), f = Math.max(0, Math.min(1, (val - w.min) / (w.max - w.min)));
+    return `<div class="tile ${lv}"><div class="trow"><span class="t">${w.t}</span><span class="un">${w.u}</span></div>
+      <div class="numbox"><span class="num" data-fit="old-tile" style="color:${colorOf(lv)}">${fmt(val, w.d)}</span></div>
+      <div class="bar"><i style="width:${f * 100}%;background:${lv ? colorOf(lv) : "var(--ok)"}"></i></div></div>`;
+  };
+  return status() + `<div class="body">
+    <div class="w shift" id="leds" style="flex-grow:.28">${shiftLeds(v.rpm)}</div>
+    <div class="w tile" style="flex-grow:2.5;padding:6px 12px" data-foot="old">
+      <span class="lbl">RPM</span>
+      <div class="numbox"><span class="num rpmnum" data-fit="old-big" data-min="4">${v.rpm}</span></div>
+      <div class="foot"><span class="v">${v.spd}</span><span class="u">km/h</span><span class="sp"></span><span class="v">${v.gear}</span><span class="u">marcha</span></div>
+    </div>
+    <div class="w tile" style="flex-grow:1.05;padding:6px 12px">
+      <span class="lbl">Lambda</span>
+      <div class="numbox"><span class="num" data-fit="old-big" data-min="5" data-hf=".9" style="color:${lamColor(v.lam, v.tgt)}">${fmt(v.lam, 3)}</span></div>
+      <div class="alvo">alvo ${fmt(v.tgt, 2)}</div>
+    </div>
+    <div class="w grid" style="flex-grow:2.3">${OLD_ORDER.map(r => `<div class="row">${r.map(tile).join("")}</div>`).join("")}</div>
+  </div>`;
+}
+
+function renderNew(v) {
+  const order = NEW_ORDER[state.cols];
+  const tile = k => {
+    const w = TILES[k], val = v[k], lv = level(k, val), f = Math.max(0, Math.min(1, (val - w.min) / (w.max - w.min)));
+    const id = state.noColor ? "var(--muted)" : `var(--c-${k})`;
+    const bg = state.noColor ? "var(--text)" : `var(--c-${k})`;
+    const barC = lv ? colorOf(lv) : state.noColor ? "var(--ok)" : `var(--c-${k})`;
+    return `<div class="tile small ${lv}">
+      <svg class="bgicon ico" viewBox="0 0 24 24" style="color:${lv ? colorOf(lv) : bg}"><use href="#i-${k}"/></svg>
+      <div class="trow"><svg class="ico" style="color:${id}"><use href="#i-${k}"/></svg><span class="t">${w.t}</span><span class="un">${w.u}</span></div>
+      <div class="numbox"><span class="num" data-fit="new" data-ref="${w.ref}" style="color:${colorOf(lv)}">${fmt(val, w.d)}</span></div>
+      <div class="bar"><i style="width:${f * 100}%;background:${barC}"></i></div></div>`;
+  };
+  const tilesGrow = state.cols === 2 ? 3.45 : 2.9;
+  const rpmGrow = state.cols === 2 ? 1.72 : 1.9;
+  return status() + `<div class="body">
+    <div class="w rpmbar" id="rpmbar" style="flex-grow:.28"><div class="fill"></div></div>
+    <div class="w tile big" style="flex-grow:${rpmGrow}">
+      <span class="lbl">RPM</span>
+      <div class="numbox"><span class="num rpmnum" data-fit="new" data-ref="8888" data-hf="1.22">${v.rpm}</span></div>
+      <div class="foot"><span class="v" style="font-size:60px">${v.spd}</span><span class="u" style="font-size:18px">km/h</span><span class="sp"></span><span class="v" style="font-size:60px">${v.gear}</span><span class="u" style="font-size:18px">marcha</span></div>
+    </div>
+    <div class="w tile big" style="flex-grow:.95">
+      <span class="lbl">Lambda</span>
+      <div class="numbox"><span class="num" data-fit="new" data-ref="0.888" data-hf="1.2" style="color:${lamColor(v.lam, v.tgt)}">${fmt(v.lam, 3)}</span></div>
+      <div class="alvo">alvo ${fmt(v.tgt, 2)}</div>
+    </div>
+    <div class="w grid" style="flex-grow:${tilesGrow}">${order.map(r => `<div class="row">${r.map(tile).join("")}</div>`).join("")}</div>
+  </div>`;
+}
+
+const ctx = document.createElement("canvas").getContext("2d");
+function textW(s, px) { ctx.font = `700 ${px}px Roboto, system-ui, sans-serif`; return ctx.measureText(s).width; }
+
+function fitAll(root) {
+  root.querySelectorAll("[data-fit]").forEach(el => {
+    const box = el.parentElement, W = box.clientWidth, H = box.clientHeight, s = el.textContent;
+    let px;
+    if (el.dataset.fit === "new") {
+      // Proposta: medido de verdade, reservando a largura do maior valor do quadro.
+      const ref = el.dataset.ref.length >= s.length ? el.dataset.ref : s;
+      const hf = +(el.dataset.hf || 1.25);
+      px = Math.min((W * 0.94) / (textW(ref, 100) / 100), H * hf);
+    } else if (el.dataset.fit === "old-tile") {
+      // Mesma conta do NumberTile atual: 0.6 em por dígito, mínimo de 3.
+      const units = Math.max([...s].filter(c => c !== ".").length + 0.5 * [...s].filter(c => c === ".").length, 3);
+      px = Math.min(W / (units * 0.6), H * 0.95);
+      px = Math.max(12, Math.min(110, px));
+    } else {
+      const units = Math.max([...s].filter(c => c !== ".").length + 0.5 * [...s].filter(c => c === ".").length, +el.dataset.min);
+      px = Math.min(W / (units * 0.6), H * +(el.dataset.hf || 0.85));
+    }
+    el.style.fontSize = px + "px";
+  });
+  root.querySelectorAll("[data-foot=old]").forEach(t => {
+    const sz = Math.max(16, Math.min(44, (t.clientHeight - 12) * 0.16));
+    t.querySelectorAll(".foot .v").forEach(e => e.style.fontSize = sz + "px");
+    t.querySelectorAll(".foot .u").forEach(e => e.style.fontSize = "14px");
+  });
+}
+
+function scale() {
+  const avail = document.querySelector(".phones").clientWidth;
+  const s = Math.min(1, avail / 390);
+  document.querySelectorAll(".frame").forEach(f => {
+    f.style.width = 390 * s + "px"; f.style.height = 800 * s + "px";
+    f.firstElementChild.style.transform = `scale(${s})`;
+  });
+}
+
+function render() {
+  const v = VALS[state.vals];
+  const o = document.getElementById("old"), n = document.getElementById("new");
+  o.innerHTML = renderOld(v);
+  n.innerHTML = renderNew(v);
+  n.classList.toggle("noBg", state.noBg);
+  n.classList.toggle("noLabelIcon", state.noLabelIcon);
+  fitAll(o); fitAll(n);
+  document.querySelectorAll("[data-vals]").forEach(b => b.setAttribute("aria-pressed", b.dataset.vals === state.vals));
+  document.querySelectorAll("[data-cols]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.cols === state.cols));
+  document.querySelectorAll("[data-toggle]").forEach(b => b.setAttribute("aria-pressed", !state[b.dataset.toggle]));
+  try { localStorage.setItem("painel-mockup", JSON.stringify(state)); } catch (e) {}
+  setRpm(v.rpm);
+}
+
+// Muda só a rotação, sem redesenhar a tela, pra transição da barra ficar contínua.
+let curRpm = 0;
+function setRpm(r) {
+  curRpm = r;
+  document.querySelectorAll(".rpmnum").forEach(e => e.textContent = Math.round(r));
+  const leds = document.getElementById("leds"); if (leds) leds.innerHTML = shiftLeds(r);
+  const bar = document.getElementById("rpmbar");
+  if (bar) { bar.style.setProperty("--p", Math.min(100, r / 70) + "%"); bar.classList.toggle("shift", r >= SHIFT); }
+  document.getElementById("rpm").value = r;
+  document.getElementById("rpm-out").value = Math.round(r);
+}
+document.getElementById("rpm").addEventListener("input", e => { stopRev(); setRpm(+e.target.value); });
+
+// Acelerada simulada: amostras a 14 Hz, como a ECU manda; lenta oscilando um pouco.
+let revTimer = null;
+function stopRev() { clearInterval(revTimer); revTimer = null; document.getElementById("rev").setAttribute("aria-pressed", "false"); }
+document.getElementById("rev").addEventListener("click", () => {
+  if (revTimer) return stopRev();
+  document.getElementById("rev").setAttribute("aria-pressed", "true");
+  const t0 = performance.now();
+  revTimer = setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    let r;
+    if (t < 1) r = 900 + Math.sin(t * 9) * 25;
+    else if (t < 3.4) r = 900 + (6450 - 900) * Math.pow((t - 1) / 2.4, 1.4);
+    else if (t < 3.8) r = 6450 + Math.sin(t * 40) * 40;
+    else if (t < 5.2) r = 6450 - (6450 - 900) * (1 - Math.pow(1 - (t - 3.8) / 1.4, 2));
+    else if (t < 7) r = 900 + Math.sin(t * 9) * 25;
+    else { stopRev(); return; }
+    setRpm(r);
+  }, 1000 / 14);
+});
+
+document.querySelector(".controls").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.vals) state.vals = b.dataset.vals;
+  if (b.dataset.cols) state.cols = +b.dataset.cols;
+  if (b.dataset.toggle) state[b.dataset.toggle] = !state[b.dataset.toggle];
+  render();
+});
+window.addEventListener("resize", scale);
+scale();
+render();
+document.fonts.ready.then(render);
+</script>

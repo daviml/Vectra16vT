@@ -81,8 +81,7 @@ object DashTemplates {
     val speedMain = DashWidget(Role.SPEED, WidgetKind.NUMBER, "Velocidade", 0.0, 160.0, units = "km/h")
     val gear = DashWidget(Role.GEAR, WidgetKind.NUMBER, "Marcha", 1.0, 5.0)
 
-    /** Shift light: first LED at [SHIFT_LIGHT_START], all of them flashing from [SHIFT_RPM]. */
-    const val SHIFT_LIGHT_START = 1500.0
+    /** Shift point: the RPM bar flashes red from here. */
     const val SHIFT_RPM = 6300.0
 
     /** Pages after the main one (swipe sideways). */
