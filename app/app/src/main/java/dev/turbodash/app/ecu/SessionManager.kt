@@ -17,11 +17,13 @@ import dev.turbodash.core.ecu.GearEstimator
 import dev.turbodash.core.ecu.Role
 import dev.turbodash.core.ecu.SessionState
 import dev.turbodash.core.ecu.Snapshot
+import dev.turbodash.core.ecu.ToothBlock
 import dev.turbodash.core.ini.DatalogEntry
 import dev.turbodash.core.ini.IniDefinition
 import dev.turbodash.core.ini.OutputChannel
 import dev.turbodash.core.log.MslReader
 import dev.turbodash.core.log.MslWriter
+import dev.turbodash.core.log.ToothLogWriter
 import dev.turbodash.core.sim.ReplayEngine
 import dev.turbodash.core.sim.Scenario
 import dev.turbodash.core.sim.SimulatedEcu
@@ -90,6 +92,8 @@ class SessionManager(private val context: Context, private val store: ProfileSto
     private var thread: Thread? = null
     private val logLock = Any()
     private var writer: MslWriter? = null
+    // Crank trigger capture of the current log; the file only exists once the first buffer arrives.
+    private var toothWriter: ToothLogWriter? = null
     private var marks = 0
     // Auto log already started on this link: "Parar" keeps it stopped until the next connection.
     @Volatile private var autoLogged = false
@@ -134,6 +138,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         _target.value = target
         val s = EcuSession(
             ini, opener, fallbackTune = msqTune, listener = sessionListener(++generation), alertConfig = store.alertConfig,
+            crankCapture = store.crankCapture,
         )
         session = s
         autoLogged = false
@@ -227,11 +232,20 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             val w = writer ?: return
             w.close()
             writer = null
+            val teeth = toothWriter
+            teeth?.close()
+            toothWriter = null
             val status = _log.value
             _log.value = null
-            if (!keepShort && status != null && status.rows < MIN_LOG_ROWS) status.file.delete()
+            // A log that died while cranking is short, but its trigger capture is the interesting part.
+            if (!keepShort && status != null && status.rows < MIN_LOG_ROWS && (teeth?.blocks ?: 0) == 0) {
+                status.file.delete()
+                toothFile(status.file).delete()
+            }
         }
     }
+
+    private fun toothFile(log: File) = File(log.parentFile, ToothLogWriter.nameFor(log.name))
 
     fun mark() {
         synchronized(logLock) { writer?.mark(++marks) }
@@ -260,6 +274,17 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         override fun onTune(tune: Tune, fromEcu: Boolean) {
             if (gen != generation) return
             _tune.value = TuneInfo(tune, fromEcu)
+        }
+
+        override fun onToothBlock(block: ToothBlock) {
+            if (gen != generation) return
+            synchronized(logLock) {
+                val log = _log.value?.file ?: return // not logging: nowhere to keep it
+                if (writer == null) return
+                val w = toothWriter ?: runCatching { ToothLogWriter(toothFile(log).bufferedWriter(Charsets.ISO_8859_1)) }
+                    .getOrNull()?.also { toothWriter = it } ?: return
+                runCatching { w.append(block) }
+            }
         }
 
         override fun onFrame(frame: Snapshot, alerts: List<Alert>) {

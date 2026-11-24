@@ -69,19 +69,42 @@ class EcuClient(
     /** Reads one calibration page in blocks of `blockingFactor` bytes. */
     fun readPage(page: Int, progress: (Int) -> Unit = {}): ByteArray {
         val size = ini.pageSizes[page]
-        val template = ini.pageReadCommands[page]
-        require(template.isNotEmpty()) { "INI sem pageReadCommand para a página ${page + 1}" }
         val out = ByteArray(size)
-        val block = ini.blockingFactor.coerceAtLeast(16)
+        val block = pageBlockSize
         var off = 0
         while (off < size) {
             val n = minOf(block, size - off)
-            val data = request(CommandFormatter.format(template, params(off, n)), n)
-            data.copyInto(out, off, 0, n)
+            readPageBlock(page, off, n).copyInto(out, off, 0, n)
             off += n
             progress(off)
         }
         return out
+    }
+
+    /** Largest piece of a calibration page the ECU sends in one answer. */
+    val pageBlockSize: Int get() = ini.blockingFactor.coerceAtLeast(16)
+
+    /** Reads [count] bytes of a calibration page starting at [offset] (one request). */
+    fun readPageBlock(page: Int, offset: Int, count: Int): ByteArray {
+        val template = ini.pageReadCommands[page]
+        require(template.isNotEmpty()) { "INI sem pageReadCommand para a página ${page + 1}" }
+        return request(CommandFormatter.format(template, params(offset, count)), count).copyOf(count)
+    }
+
+    /**
+     * Reads one of the MS2/Extra high speed logger buffers (0xf0 tooth, 0xf1 trigger, 0xf2 composite,
+     * 0xf3 sync error), with the same single request TunerStudio uses for its standard loggers:
+     * `r <canId> <table> 0x0000 0x0400`. Reading the buffer also restarts the logger in the ECU.
+     */
+    fun readLoggerBuffer(table: Int, size: Int = LOGGER_BUFFER_SIZE): ByteArray {
+        val cmd = byteArrayOf('r'.code.toByte(), canId.toByte(), table.toByte(), 0, 0, (size shr 8).toByte(), size.toByte())
+        return request(cmd, size).copyOf(size)
+    }
+
+    /** Throws away anything still arriving after a failed request, so the next one starts clean. */
+    fun resync(quietMs: Long = 300) {
+        try { Thread.sleep(quietMs) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        transport.drain()
     }
 
     /** CRC32 of a page as computed by the ECU, or null if the INI has no CRC command. */
@@ -89,5 +112,9 @@ class EcuClient(
         val template = ini.crc32CheckCommands.getOrNull(page)?.takeIf { it.isNotEmpty() } ?: return null
         val data = request(CommandFormatter.format(template, params()), 4)
         return MsEnvelope.getU32(data, 0)
+    }
+
+    companion object {
+        const val LOGGER_BUFFER_SIZE = 1024
     }
 }

@@ -28,11 +28,15 @@ class EcuSession(
     alertConfig: AlertConfig = AlertConfig(),
     private val targetHz: Double = 20.0,
     private val readTuneFromEcu: Boolean = true,
+    /** Record the crank trigger edges while the engine is being started (MS2/Extra composite logger). */
+    private val crankCapture: Boolean = false,
 ) {
     interface Listener {
         fun onState(state: SessionState)
         fun onTune(tune: Tune, fromEcu: Boolean) {}
         fun onFrame(snapshot: Snapshot, alerts: List<Alert>)
+        /** A composite logger buffer read during cranking ([crankCapture]). */
+        fun onToothBlock(block: ToothBlock) {}
     }
 
     val roles = ChannelRoles(ini)
@@ -45,6 +49,14 @@ class EcuSession(
 
     @Volatile private var stopped = false
     @Volatile private var transport: Transport? = null
+    private var client: EcuClient? = null
+    private val capture = CrankCapture(
+        readBuffer = { client!!.readLoggerBuffer(CrankCapture.TABLE) },
+        onBlock = { listener.onToothBlock(it) },
+        // A late answer would be taken for the next realtime block: wait for it and throw it away.
+        onFailure = { client?.resync() },
+    )
+    private val rpmChannel = roles.channel(Role.RPM)
     private val t0 = System.nanoTime()
 
     fun stop() {
@@ -63,6 +75,7 @@ class EcuSession(
                 transport = t
                 if (stopped) { t.close(); break }
                 val client = EcuClient(ini, t)
+                this.client = client
 
                 val sig = client.querySignature()
                 if (!client.signatureMatches(sig)) {
@@ -78,7 +91,15 @@ class EcuSession(
                     break
                 }
 
-                if (readTuneFromEcu && !tuneLoaded) {
+                val capturing = crankCapture && CrankCapture.supported(sig) && !capture.disabled
+                capture.reset()
+                var pendingTune: TuneReader? = null
+                if (readTuneFromEcu && !tuneLoaded && capturing && fallbackTune != null && !engineRunning(client)) {
+                    // Engine not started yet: reading the 7 pages first would take the seconds in which
+                    // it is cranked. Poll right away with the msq tune and fetch the pages in between.
+                    listener.onTune(fallbackTune, fromEcu = false)
+                    pendingTune = TuneReader(client)
+                } else if (readTuneFromEcu && !tuneLoaded) {
                     val total = ini.pageSizes.sum().coerceAtLeast(1)
                     var done = 0
                     val pages = ini.pageSizes.indices.map { p ->
@@ -97,7 +118,7 @@ class EcuSession(
                 }
 
                 attempt = 0
-                pollLoop(client, sig)
+                pollLoop(client, sig, capturing, pendingTune) { tuneLoaded = true }
             } catch (e: Exception) {
                 if (stopped) break
                 listener.onState(SessionState.Failed(e.message ?: e.javaClass.simpleName, retrying = true))
@@ -111,7 +132,33 @@ class EcuSession(
         listener.onState(SessionState.Stopped)
     }
 
-    private fun pollLoop(client: EcuClient, sig: String) {
+    private fun engineRunning(client: EcuClient): Boolean {
+        val snap = decoder.decode(client.readOutputChannels(), (System.nanoTime() - t0) / 1e9)
+        return (rpmChannel?.let { snap[it] } ?: 0.0) >= CrankCapture.RUN_RPM
+    }
+
+    /** Reads the calibration one block per call, so it can be spread between realtime frames. */
+    private inner class TuneReader(private val client: EcuClient) {
+        private val pages = ini.pageSizes.map { ByteArray(it) }
+        private var page = 0
+        private var offset = 0
+
+        /** Returns the tune once the last block is in, null before that. */
+        fun step(): Tune? {
+            while (page < pages.size && offset >= pages[page].size) { page++; offset = 0 }
+            if (page < pages.size) {
+                val n = minOf(client.pageBlockSize, pages[page].size - offset)
+                client.readPageBlock(page, offset, n).copyInto(pages[page], offset)
+                offset += n
+                if (offset < pages[page].size || page < pages.size - 1) return null
+            }
+            return Tune(ini, pages)
+        }
+    }
+
+    private fun pollLoop(client: EcuClient, sig: String, capturing: Boolean, tuneReader: TuneReader?, onTuneLoaded: () -> Unit) {
+        var pendingTune = tuneReader
+        var runningSince: Double? = null
         val periodNs = (1e9 / targetHz).toLong()
         var frames = 0
         var windowStart = System.nanoTime()
@@ -122,6 +169,23 @@ class EcuSession(
             val snap = decoder.decode(block, (start - t0) / 1e9)
             listener.onFrame(snap, alerts.evaluate(snap))
             frames++
+            val rpm = rpmChannel?.let { snap[it] } ?: 0.0
+            if (rpm >= CrankCapture.RUN_RPM) { if (runningSince == null) runningSince = snap.time } else runningSince = null
+            if (capturing) capture.update(snap.time, rpm, (snap["status3"] ?: 0.0).toInt())
+            // Calibration left for later: only with the engine stopped or already running for a while,
+            // never during cranking.
+            val settled = rpm == 0.0 || runningSince?.let { snap.time - it > TUNE_AFTER_START_S } == true
+            val reader = pendingTune
+            if (reader != null && settled) {
+                val tune = reader.step()
+                if (tune != null) {
+                    fallbackTune?.pcValues?.let { tune.pcValues.putAll(it) }
+                    decoder.tune = tune
+                    pendingTune = null
+                    onTuneLoaded()
+                    listener.onTune(tune, fromEcu = true)
+                }
+            }
             val now = System.nanoTime()
             if (now - windowStart >= 1_000_000_000L) {
                 hz = frames * 1e9 / (now - windowStart)
@@ -142,4 +206,8 @@ class EcuSession(
 
     /** Decoder in use (the app needs it for log units). */
     fun channelDecoder(): ChannelDecoder = decoder
+
+    private companion object {
+        const val TUNE_AFTER_START_S = 3.0
+    }
 }

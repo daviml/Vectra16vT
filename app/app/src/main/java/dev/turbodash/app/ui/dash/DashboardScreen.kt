@@ -90,7 +90,9 @@ fun DashboardScreen(
         onDispose { view.keepScreenOn = false }
     }
 
-    val s = snapshot
+    // Link down (connecting, failed, retrying): the last frame is old news, show empty instruments
+    // instead of numbers that look live.
+    val s = snapshot.takeIf { state is SessionState.Running || state is SessionState.ReadingTune }
     fun value(role: Role): Double? = if (s == null || roles == null) null else valueOf(role, s, roles)
     fun alertOf(role: Role): Severity? = alerts.filter { it.role == role }.maxByOrNull { it.severity.ordinal }?.severity
     val frame = HudFrame(

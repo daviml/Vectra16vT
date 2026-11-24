@@ -203,6 +203,16 @@ fun SettingsScreen(store: ProfileStore, sessions: SessionManager) {
                 Switch(auto, onCheckedChange = { auto = it; store.autoLog = it })
                 Text("  Gravar log automaticamente (um por conexão)")
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                var teeth by remember { mutableStateOf(store.crankCapture) }
+                Switch(teeth, onCheckedChange = { teeth = it; store.crankCapture = it })
+                Text("  Gravar os dentes da roda fônica na partida")
+            }
+            Text(
+                "Vai junto com o log, num arquivo .dentes.csv, para achar a causa das perdas de sincronismo. " +
+                    "Vale a partir da próxima conexão. Desligue se a partida parecer pior com ele ligado.",
+                color = Palette.muted, fontSize = 12.sp,
+            )
         }
 
         // ------------------------------------------------------------ profile

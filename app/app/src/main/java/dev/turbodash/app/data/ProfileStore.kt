@@ -47,6 +47,11 @@ class ProfileStore(context: Context) {
         get() = prefs.getBoolean("autoLog", true)
         set(v) = prefs.edit().putBoolean("autoLog", v).apply()
 
+    /** Record the crank trigger edges while starting the engine, next to the datalog. */
+    var crankCapture: Boolean
+        get() = prefs.getBoolean("crankCapture", true)
+        set(v) = prefs.edit().putBoolean("crankCapture", v).apply()
+
     var dashStyle: DashStyle
         get() = prefs.getString("dashStyle", null)?.let { n -> DashStyle.entries.firstOrNull { it.name == n } } ?: DashStyle.MAIN
         set(v) = prefs.edit().putString("dashStyle", v.name).apply()

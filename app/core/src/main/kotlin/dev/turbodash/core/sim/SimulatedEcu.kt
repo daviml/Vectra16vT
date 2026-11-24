@@ -131,6 +131,14 @@ class SimulatedEcu(
                 val table = p[2].toInt() and 0xFF
                 val off = u16(p, 3)
                 val cnt = u16(p, 5)
+                if (table == LOGGER_TABLE) {
+                    if (off != 0 || cnt != LOGGER_SIZE) return 0x84 to ByteArray(0)
+                    val full = loggerFull()
+                    loggerReads++
+                    loggerArmedAt = clock() // reading restarts the logger, as in the firmware
+                    loggerEdges = 0.0
+                    return 0x01 to loggerBuffer(full)
+                }
                 if (table == ochTableId) {
                     val och = outputBlock()
                     0x01 to och.copyOfRange(off.coerceAtMost(och.size), (off + cnt).coerceAtMost(och.size))
@@ -161,6 +169,39 @@ class SimulatedEcu(
         }
     }
 
+    // ------------------------------------------------------------------ composite logger (page 0xf2)
+
+    /** How many times the logger buffer was read (tests). */
+    @Volatile var loggerReads = 0
+        private set
+    private var loggerArmedAt: Double? = null
+    private var loggerEdges = 0.0
+    private var loggerClock = 0.0
+
+    /** Counts trigger edges since the logger was armed: 60-2 wheel = 58 teeth per turn. */
+    private fun loggerFull(): Boolean {
+        val armed = loggerArmedAt ?: return false
+        val now = clock()
+        val rpm = source.values(now)["rpm"] ?: 0.0
+        loggerEdges += rpm / 60.0 * 58.0 * (now - maxOf(loggerClock, armed)).coerceAtLeast(0.0)
+        loggerClock = now
+        return loggerEdges >= LOGGER_SIZE / 3
+    }
+
+    /** 341 records of 3 bytes (sync flag + tooth time in 0.66 us ticks) and one spare byte. */
+    private fun loggerBuffer(full: Boolean): ByteArray {
+        val out = ByteArray(LOGGER_SIZE)
+        if (!full) return out
+        val rpm = (source.values(clock())["rpm"] ?: 0.0).coerceAtLeast(50.0)
+        val ticks = (60.0 / rpm / 60.0 / 0.66e-6).toLong().coerceAtMost(0xFFFFF)
+        for (i in 0 until LOGGER_SIZE / 3) {
+            val gap = if (i % 58 == 57) (ticks * 3).coerceAtMost(0xFFFFF) else ticks // missing teeth
+            val v = (1L shl 20) or gap
+            out[i * 3] = (v shr 16).toByte(); out[i * 3 + 1] = (v shr 8).toByte(); out[i * 3 + 2] = v.toByte()
+        }
+        return out
+    }
+
     // ------------------------------------------------------------------ realtime encoding
 
     private fun outputBlock(): ByteArray {
@@ -173,6 +214,9 @@ class SimulatedEcu(
             val raw = (v / scale - ch.translate).roundToLong()
             write(block, ch.offset, ch.type.size, raw)
         }
+        if (loggerFull()) (ini.outputChannels["status3"] as? OutputChannel.Scalar)?.let { ch ->
+            if (ch.offset in block.indices) block[ch.offset] = (block[ch.offset].toInt() or 0x02).toByte()
+        }
         return block
     }
 
@@ -182,6 +226,11 @@ class SimulatedEcu(
             val idx = if (ini.endianBig) offset + i else offset + size - 1 - i
             b[idx] = (v shr (8 * (size - 1 - i))).toByte()
         }
+    }
+
+    private companion object {
+        const val LOGGER_TABLE = 0xf2
+        const val LOGGER_SIZE = 1024
     }
 
     /** Wall-clock seconds since creation. */

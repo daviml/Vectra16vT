@@ -46,6 +46,7 @@ import dev.turbodash.core.log.MslReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dev.turbodash.core.log.ToothLogWriter
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -213,7 +214,7 @@ fun LogsScreen(sessions: SessionManager, alertConfig: () -> dev.turbodash.core.a
             onDismissRequest = { confirmDelete = null },
             confirmButton = {
                 TextButton(onClick = {
-                    toDelete.forEach { it.delete() }
+                    toDelete.forEach { it.delete(); File(it.parentFile, ToothLogWriter.nameFor(it.name)).delete() }
                     confirmDelete = null
                     selected = emptySet()
                     refresh()

@@ -3,6 +3,7 @@ package dev.turbodash.app.ui.logs
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
+import dev.turbodash.core.log.ToothLogWriter
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,7 +23,9 @@ object LogBundle {
         val day = SimpleDateFormat("yyyy-MM-dd_HH.mm", Locale.US).format(Date())
         val out = File(outDir, "TurboDash-logs_${day}_${files.size}.zip")
         ZipOutputStream(out.outputStream().buffered()).use { zip ->
-            for (f in files) {
+            // Each log takes its crank trigger capture along, when it has one.
+            val teeth = files.map { File(it.parentFile, ToothLogWriter.nameFor(it.name)) }.filter { it.isFile }
+            for (f in files + teeth) {
                 zip.putNextEntry(ZipEntry(f.name).apply { time = f.lastModified() })
                 f.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
