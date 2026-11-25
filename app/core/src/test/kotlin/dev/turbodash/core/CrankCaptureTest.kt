@@ -32,54 +32,69 @@ class CrankCaptureTest {
     }
 
     @Test
-    fun `arms with the engine stopped and reads only when the ECU flags a full buffer`() {
+    fun `arms with the engine stopped and reads by time while cranking`() {
         val f = Fake()
-        assertTrue(f.capture.update(0.0, 0.0, 0))          // key on: arming read, nothing stored
+        assertTrue(f.capture.update(0.0, 0.0, 0))          // key on: arming read
         assertFalse(f.capture.update(0.1, 0.0, 0x02))      // leftover flag with the engine stopped: ignored
-        for (i in 2..20) assertFalse(f.capture.update(i * 0.1, 150.0, 0)) // cranking, buffer filling
-        assertEquals(1, f.reads)
-        assertTrue(f.capture.update(2.5, 160.0, 0x02))     // full
-        assertFalse(f.capture.update(2.6, 160.0, 0x02))    // flag not cleared yet: wait the minimum gap
-        assertTrue(f.capture.update(5.0, 170.0, 0x0a))     // other status3 bits do not matter
-        assertEquals(listOf("full", "full"), f.blocks.map { it.kind })
-        assertEquals(listOf(2.5, 5.0), f.blocks.map { it.time })
-        assertEquals(160.0, f.blocks[0].rpm)
+        for (i in 0..11) assertFalse(f.capture.update(30.0 + i * 0.1, 150.0, 0)) // cranking, buffer filling
+        assertTrue(f.capture.update(31.25, 150.0, 0))      // 1.2 s of cranking: read, flag or no flag
+        assertFalse(f.capture.update(31.3, 160.0, 0x02))   // flag right after a read: wait the minimum gap
+        assertTrue(f.capture.update(31.75, 160.0, 0x0a))   // the flag brings the next read forward
+        assertFalse(f.capture.update(32.5, 170.0, 0))
+        assertTrue(f.capture.update(33.0, 170.0, 0))
+        assertEquals(listOf("arm", "partial", "full", "partial"), f.blocks.map { it.kind })
+        assertEquals(listOf(0.0, 31.25, 31.75, 33.0), f.blocks.map { it.time })
+        assertEquals(150.0, f.blocks[1].rpm)
+        assertEquals(4, f.reads)
     }
 
     @Test
-    fun `stops after the engine catches and arms again when it stalls`() {
+    fun `reads once more when the engine catches and arms again when it stalls`() {
         val f = Fake()
         f.capture.update(0.0, 150.0, 0)                    // connected while already cranking
-        assertTrue(f.capture.update(1.0, 900.0, 0x02))     // buffer that holds the moment it fired
-        assertFalse(f.capture.update(4.0, 1100.0, 0x02))   // running for more than 2.5 s: disarmed
+        assertFalse(f.capture.update(0.3, 900.0, 0))       // fired, but the arming read was 0.3 s ago
+        assertTrue(f.capture.update(0.5, 900.0, 0))        // buffer that holds the moment it fired
+        assertFalse(f.capture.update(4.0, 1100.0, 0x02))   // running: left alone
         assertFalse(f.capture.update(60.0, 1100.0, 0x02))
         assertEquals(2, f.reads)
         assertTrue(f.capture.update(61.0, 0.0, 0))         // stalled: armed again
-        assertTrue(f.capture.update(63.0, 140.0, 0x02))
-        assertEquals(2, f.blocks.size)
+        assertFalse(f.capture.update(62.0, 140.0, 0))
+        assertTrue(f.capture.update(63.5, 140.0, 0))
+        assertEquals(listOf("arm", "fired", "arm", "partial"), f.blocks.map { it.kind })
     }
 
     @Test
-    fun `reads a partial buffer when cranking never fills it`() {
+    fun `a short start still gets the buffer of the moment it fired`() {
         val f = Fake()
         f.capture.update(0.0, 0.0, 0)
-        for (i in 1..49) assertFalse(f.capture.update(i * 0.1, 90.0, 0))
-        assertTrue(f.capture.update(5.1, 90.0, 0))
-        assertEquals("partial", f.blocks.single().kind)
+        for (i in 1..8) assertFalse(f.capture.update(10.0 + i * 0.1, 150.0, 0)) // 0.8 s of cranking
+        assertTrue(f.capture.update(10.9, 800.0, 0))
+        assertEquals(listOf("arm", "fired"), f.blocks.map { it.kind })
     }
 
     @Test
-    fun `gives up after two failed reads`() {
+    fun `a failed read is recorded and tried again later, never switched off`() {
         val f = Fake()
         f.fail = true
         assertFalse(f.capture.update(0.0, 0.0, 0))
-        assertFalse(f.capture.disabled)
-        assertFalse(f.capture.update(0.1, 0.0, 0))
-        assertTrue(f.capture.disabled)
-        f.fail = false
-        f.capture.reset()                                   // a reconnection does not bring it back
-        assertFalse(f.capture.update(1.0, 150.0, 0x02))
+        assertFalse(f.capture.update(0.5, 0.0, 0))         // waiting 1 s
+        assertFalse(f.capture.update(1.0, 0.0, 0))         // second failure: now waits 2 s
+        assertFalse(f.capture.update(2.5, 0.0, 0))
         assertEquals(2, f.reads)
+        assertEquals(listOf("fail", "fail"), f.blocks.map { it.kind })
+        assertTrue(f.blocks[0].note.contains("sem resposta"))
+        assertFalse(f.blocks[0].hasEdges)
+        f.fail = false
+        assertTrue(f.capture.update(3.0, 0.0, 0))          // back to work
+        assertFalse(f.capture.update(5.0, 150.0, 0))
+        assertTrue(f.capture.update(6.5, 150.0, 0))
+        assertEquals(listOf("fail", "fail", "arm", "partial"), f.blocks.map { it.kind })
+        f.fail = true
+        assertFalse(f.capture.update(8.0, 150.0, 0))
+        assertEquals(3, f.capture.failures)
+        f.fail = false
+        f.capture.reset()                                   // a reconnection starts clean
+        assertTrue(f.capture.update(7.1, 150.0, 0))
     }
 
     @Test
@@ -89,7 +104,7 @@ class CrankCaptureTest {
         w.append(ToothBlock(12.3456, "full", 151.4, 2, byteArrayOf(0x10, 0xab.toByte(), 0x00)))
         w.close()
         val lines = out.toString().lines().filter { it.isNotEmpty() && !it.startsWith("#") }
-        assertEquals(listOf("time_s;kind;rpm;status3;hex", "12.346;full;151;2;10ab00"), lines)
+        assertEquals(listOf("time_s;kind;rpm;status3;hex;note", "12.346;full;151;2;10ab00;"), lines)
         assertEquals("2026-11-24_08.36.28.dentes.csv", ToothLogWriter.nameFor("2026-11-24_08.36.28.msl"))
     }
 
@@ -126,15 +141,19 @@ class CrankCaptureTest {
         session.stop()
         th.join(5000)
 
-        // 200 rpm on a 60-2 wheel = 193 edges/s: a 341-record buffer every ~1.8 s of the 5 s of cranking.
-        assertTrue(blocks.size in 2..4, "blocks: ${blocks.map { "%.1f %s %.0f".format(it.time, it.kind, it.rpm) }}")
-        assertTrue(blocks.all { it.kind == ToothBlock.KIND_FULL && it.data.size == 1024 })
-        assertTrue(blocks.any { it.rpm == 200.0 })
+        // Arming read with the key on, one read every 1.2 s of the 5 s of cranking, one when it fires.
+        val shown = blocks.map { "%.1f %s %.0f".format(it.time, it.kind, it.rpm) }
+        assertEquals(ToothBlock.KIND_ARM, blocks.first().kind, "$shown")
+        val edges = blocks.filter { it.hasEdges }
+        assertTrue(edges.size in 4..6, "blocks: $shown")
+        assertTrue(blocks.all { it.data.size == 1024 }, "$shown")
+        assertTrue(edges.dropLast(1).all { it.kind == ToothBlock.KIND_PARTIAL && it.rpm == 200.0 }, "$shown")
+        assertEquals(ToothBlock.KIND_FIRED, edges.last().kind, "$shown")
         // Sync flag + tooth time of the simulator: 60 s / 200 rpm / 60 teeth / 0.66 us = 7575 ticks.
-        val first = blocks.first().data
+        val first = edges.first().data
         assertEquals((1 shl 20) or 7575, ((first[0].toInt() and 0xFF) shl 16) or ((first[1].toInt() and 0xFF) shl 8) or (first[2].toInt() and 0xFF))
-        // Logger left alone once the engine runs: arming read + the stored buffers (+ at most one more).
-        assertTrue(ecu.loggerReads <= blocks.size + 2, "logger reads: ${ecu.loggerReads}")
+        // Logger left alone once the engine runs: every read is in the file.
+        assertEquals(blocks.size, ecu.loggerReads)
 
         // Frames kept coming while cranking, and never a "reading calibration" screen.
         val cranking = frames.filter { (it["rpm"] ?: 0.0) == 200.0 }

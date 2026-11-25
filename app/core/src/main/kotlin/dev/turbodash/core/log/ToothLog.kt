@@ -12,23 +12,32 @@ import java.util.Locale
  */
 class ToothLogWriter(private val out: Writer) : Closeable {
 
+    /** Lines written, of any kind. */
     var blocks = 0
+        private set
+
+    /** Reads that can hold edges of a start (not arming reads, not failures). */
+    var edgeBlocks = 0
         private set
 
     init {
         out.write("# TurboDash: composite logger da MS2/Extra (pagina 0xf2) lido durante a partida\n")
-        out.write("# time_s = mesmo relogio da coluna Time do .msl; kind full = buffer completo, partial = lido por tempo\n")
+        out.write("# time_s = mesmo relogio da coluna Time do .msl\n")
+        out.write("# kind: arm = leitura que liga o logger (conteudo antigo); partial = lido por tempo no arranque (registros novos no comeco);\n")
+        out.write("#       fired = lido quando o motor pegou; full = a ECU avisou buffer completo; fail = leitura falhou (motivo em note)\n")
         out.write("# hex = 1024 bytes: 341 registros de 3 bytes (big-endian) + 1 byte sem uso\n")
         out.write("# registro: bit 23 SecLevel, bit 22 PriLevel, bit 21 Trigger, bit 20 Sync, bits 0-19 tempo desde a borda anterior x 0,66 us\n")
-        out.write("time_s;kind;rpm;status3;hex\n")
+        out.write("time_s;kind;rpm;status3;hex;note\n")
     }
 
     fun append(b: ToothBlock) {
         val hex = StringBuilder(b.data.size * 2)
         for (x in b.data) hex.append(HEX[(x.toInt() shr 4) and 0xF]).append(HEX[x.toInt() and 0xF])
-        out.write(String.format(Locale.US, "%.3f;%s;%.0f;%d;%s\n", b.time, b.kind, b.rpm, b.status3, hex))
+        val note = b.note.replace(';', ',').replace('\n', ' ')
+        out.write(String.format(Locale.US, "%.3f;%s;%.0f;%d;%s;%s\n", b.time, b.kind, b.rpm, b.status3, hex, note))
         out.flush() // a handful of lines per start, and the link may drop at any moment
         blocks++
+        if (b.hasEdges) edgeBlocks++
     }
 
     override fun close() {

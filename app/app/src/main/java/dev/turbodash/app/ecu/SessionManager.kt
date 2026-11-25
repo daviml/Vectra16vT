@@ -238,7 +238,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
             val status = _log.value
             _log.value = null
             // A log that died while cranking is short, but its trigger capture is the interesting part.
-            if (!keepShort && status != null && status.rows < MIN_LOG_ROWS && (teeth?.blocks ?: 0) == 0) {
+            if (!keepShort && status != null && status.rows < MIN_LOG_ROWS && (teeth?.edgeBlocks ?: 0) == 0) {
                 status.file.delete()
                 toothFile(status.file).delete()
             }

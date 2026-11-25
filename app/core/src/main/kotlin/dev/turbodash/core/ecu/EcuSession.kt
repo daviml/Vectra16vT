@@ -91,7 +91,7 @@ class EcuSession(
                     break
                 }
 
-                val capturing = crankCapture && CrankCapture.supported(sig) && !capture.disabled
+                val capturing = crankCapture && CrankCapture.supported(sig)
                 capture.reset()
                 var pendingTune: TuneReader? = null
                 if (readTuneFromEcu && !tuneLoaded && capturing && fallbackTune != null && !engineRunning(client)) {
@@ -161,6 +161,7 @@ class EcuSession(
         var runningSince: Double? = null
         val periodNs = (1e9 / targetHz).toLong()
         var frames = 0
+        var polled = 0L
         var windowStart = System.nanoTime()
         var hz = 0.0
         while (!stopped) {
@@ -171,7 +172,8 @@ class EcuSession(
             frames++
             val rpm = rpmChannel?.let { snap[it] } ?: 0.0
             if (rpm >= CrankCapture.RUN_RPM) { if (runningSince == null) runningSince = snap.time } else runningSince = null
-            if (capturing) capture.update(snap.time, rpm, (snap["status3"] ?: 0.0).toInt())
+            // From the second frame on: the first one is what opens the log the capture file goes with.
+            if (capturing && polled++ > 0) capture.update(snap.time, rpm, (snap["status3"] ?: 0.0).toInt())
             // Calibration left for later: only with the engine stopped or already running for a while,
             // never during cranking.
             val settled = rpm == 0.0 || runningSince?.let { snap.time - it > TUNE_AFTER_START_S } == true

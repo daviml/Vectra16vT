@@ -133,11 +133,12 @@ class SimulatedEcu(
                 val cnt = u16(p, 5)
                 if (table == LOGGER_TABLE) {
                     if (off != 0 || cnt != LOGGER_SIZE) return 0x84 to ByteArray(0)
-                    val full = loggerFull()
+                    loggerFull()
+                    val edges = loggerEdges.toInt().coerceAtMost(LOGGER_SIZE / 3)
                     loggerReads++
                     loggerArmedAt = clock() // reading restarts the logger, as in the firmware
                     loggerEdges = 0.0
-                    return 0x01 to loggerBuffer(full)
+                    return 0x01 to loggerBuffer(edges)
                 }
                 if (table == ochTableId) {
                     val och = outputBlock()
@@ -189,12 +190,11 @@ class SimulatedEcu(
     }
 
     /** 341 records of 3 bytes (sync flag + tooth time in 0.66 us ticks) and one spare byte. */
-    private fun loggerBuffer(full: Boolean): ByteArray {
+    private fun loggerBuffer(edges: Int): ByteArray {
         val out = ByteArray(LOGGER_SIZE)
-        if (!full) return out
         val rpm = (source.values(clock())["rpm"] ?: 0.0).coerceAtLeast(50.0)
         val ticks = (60.0 / rpm / 60.0 / 0.66e-6).toLong().coerceAtMost(0xFFFFF)
-        for (i in 0 until LOGGER_SIZE / 3) {
+        for (i in 0 until edges) {
             val gap = if (i % 58 == 57) (ticks * 3).coerceAtMost(0xFFFFF) else ticks // missing teeth
             val v = (1L shl 20) or gap
             out[i * 3] = (v shr 16).toByte(); out[i * 3 + 1] = (v shr 8).toByte(); out[i * 3 + 2] = v.toByte()
