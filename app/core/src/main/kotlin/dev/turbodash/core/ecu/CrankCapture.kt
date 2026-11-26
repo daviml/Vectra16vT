@@ -17,11 +17,11 @@ class ToothBlock(
     val hasEdges get() = kind != KIND_ARM && kind != KIND_FAIL
 
     companion object {
-        /** First read of a connection or after a stall: starts the logger; holds whatever was there before. */
+        /** First read of a connection or after a stall: arms the logger; usually zeros or an old recording. */
         const val KIND_ARM = "arm"
         /** The ECU flagged the buffer as complete. */
         const val KIND_FULL = "full"
-        /** Read on time while cranking: the first records are new, the rest may be from the read before. */
+        /** Read on time while cranking: the edges since the previous read, zeros after the last one. */
         const val KIND_PARTIAL = "partial"
         /** Read as soon as the engine ran: holds the moment it fired. */
         const val KIND_FIRED = "fired"
@@ -33,11 +33,13 @@ class ToothBlock(
  * Records the crank trigger edges while the engine is being started, to find out why sync is lost
  * during slow cranking.
  *
- * Uses the MS2/Extra composite logger (page 0xf2) with the request TunerStudio's standard definition
- * sends; reading the buffer is what starts the logger. On the real MegaSpeed the "buffer complete"
- * bit of `status3` never showed up (logs of 2026-11-24/25), so the reads go by time: one every
- * [CRANK_READ_S] of cranking and one as soon as the engine runs. The bit only brings a read forward.
- * Between reads the normal realtime polling goes on.
+ * Uses the MS2/Extra composite logger (page 0xf2), read in blocks of 256 bytes by
+ * [EcuClient.readLoggerBuffer]: the last block of each read arms the logger with an empty buffer,
+ * so every read returns the edges since the previous one (records not reached are zeros).
+ * Until 0.5.4 the buffer was asked for in one 1024-byte request, which the firmware refuses (0x84),
+ * so the logger was never armed and the "buffer complete" bit of `status3` never showed up.
+ * Reads go by time: one every [CRANK_READ_S] of cranking and one as soon as the engine runs; the
+ * bit only brings a read forward. Between reads the normal realtime polling goes on.
  *
  * Armed while the engine is not running (stopped or cranking), disarmed by the read taken when it
  * fires, armed again if it stalls. A failed read never reaches the session and never switches the
@@ -69,6 +71,17 @@ class CrankCapture(
         retryAt = Double.NEGATIVE_INFINITY
         consecutiveFailures = 0
         blocks = 0
+    }
+
+    /** True while the ECU logger is believed to be recording for this capture. */
+    val isArmed get() = armed
+
+    /**
+     * The ECU logger was switched off behind the capture's back (a calibration page was read: the
+     * firmware copies it into the same RAM). The next [update] with the engine not running arms it again.
+     */
+    fun disarm() {
+        armed = false
     }
 
     /** Call once per realtime frame. Returns true when a logger buffer was read on this call. */

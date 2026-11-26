@@ -2,12 +2,15 @@ package dev.turbodash.core
 
 import dev.turbodash.core.alerts.Alert
 import dev.turbodash.core.ecu.CrankCapture
+import dev.turbodash.core.ecu.EcuClient
 import dev.turbodash.core.ecu.EcuSession
 import dev.turbodash.core.ecu.SessionState
 import dev.turbodash.core.ecu.Snapshot
 import dev.turbodash.core.ecu.ToothBlock
 import dev.turbodash.core.log.ToothLogWriter
+import dev.turbodash.core.protocol.EcuProtocolException
 import dev.turbodash.core.protocol.EcuTimeoutException
+import dev.turbodash.core.protocol.MsEnvelope
 import dev.turbodash.core.sim.EngineSource
 import dev.turbodash.core.sim.SimulatedEcu
 import dev.turbodash.core.tune.Tune
@@ -16,6 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -98,6 +102,32 @@ class CrankCaptureTest {
     }
 
     @Test
+    fun `a logger switched off behind its back is armed again`() {
+        val f = Fake()
+        assertTrue(f.capture.update(0.0, 0.0, 0))
+        assertTrue(f.capture.isArmed)
+        f.capture.disarm()                                 // a calibration page was read
+        assertFalse(f.capture.isArmed)
+        assertTrue(f.capture.update(0.5, 0.0, 0))          // armed again, not waiting on a dead logger
+        assertEquals(listOf("arm", "arm"), f.blocks.map { it.kind })
+    }
+
+    @Test
+    fun `the ECU refuses the logger in one request and accepts it in blocks of 256`() {
+        val ini = Fixtures.vectraIni
+        val ecu = SimulatedEcu(ini, Fixtures.vectraTune(), ColdStart())
+        ecu.write(MsEnvelope.wrap(byteArrayOf('r'.code.toByte(), 0, 0xf2.toByte(), 0, 0, 0x04, 0x00)))
+        val refused = assertFailsWith<EcuProtocolException> { MsEnvelope.readResponse(ecu, 1000) }
+        assertTrue(refused.message!!.contains("0x84"), refused.message)
+        val client = EcuClient(ini, ecu)
+        assertContentEquals(ByteArray(1024), client.readLoggerBuffer(0xf2)) // first pass: page zapped, logger armed
+        assertTrue(ecu.loggerOn)
+        assertEquals(1, ecu.loggerReads)
+        client.readPageBlock(0, 0, 256)                    // calibration back in the RAM: logger off
+        assertFalse(ecu.loggerOn)
+    }
+
+    @Test
     fun `writes one hex line per buffer`() {
         val out = StringWriter()
         val w = ToothLogWriter(out)
@@ -117,7 +147,7 @@ class CrankCaptureTest {
     }
 
     @Test
-    fun `session records cranking and reads the tune afterwards without stopping the frames`() {
+    fun `session reads the tune with the key on, then records cranking without stopping the frames`() {
         val ini = Fixtures.vectraIni
         val tune = Fixtures.vectraTune()
         val blocks = CopyOnWriteArrayList<ToothBlock>()
@@ -149,9 +179,10 @@ class CrankCaptureTest {
         assertTrue(blocks.all { it.data.size == 1024 }, "$shown")
         assertTrue(edges.dropLast(1).all { it.kind == ToothBlock.KIND_PARTIAL && it.rpm == 200.0 }, "$shown")
         assertEquals(ToothBlock.KIND_FIRED, edges.last().kind, "$shown")
-        // Sync flag + tooth time of the simulator: 60 s / 200 rpm / 60 teeth / 0.66 us = 7575 ticks.
+        // Synced + primary level + tooth time of the simulator: 60 s / 200 rpm / 60 teeth / (2/3 us) = 7500 ticks.
         val first = edges.first().data
-        assertEquals((1 shl 20) or 7575, ((first[0].toInt() and 0xFF) shl 16) or ((first[1].toInt() and 0xFF) shl 8) or (first[2].toInt() and 0xFF))
+        assertEquals((0x50 shl 16) or 7500, ((first[0].toInt() and 0xFF) shl 16) or ((first[1].toInt() and 0xFF) shl 8) or (first[2].toInt() and 0xFF))
+        assertTrue(blocks.none { it.kind == ToothBlock.KIND_FAIL }, "$shown")
         // Logger left alone once the engine runs: every read is in the file.
         assertEquals(blocks.size, ecu.loggerReads)
 
@@ -161,7 +192,7 @@ class CrankCaptureTest {
         assertTrue(cranking.zipWithNext().all { (a, b) -> b.time - a.time < 0.5 }, "gap in the frames while cranking")
         assertFalse(states.any { it is SessionState.ReadingTune })
         assertTrue(states.none { it is SessionState.Failed }, "$states")
-        // msq tune first, the one from the ECU once the engine was running.
+        // msq tune first, the one from the ECU before the cranking (it would switch the logger off).
         assertEquals(listOf(false, true), tunes.toList())
         for (p in 0 until ini.nPages) assertContentEquals(tune.pages[p], ecuTune!!.pages[p])
     }

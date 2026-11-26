@@ -172,13 +172,19 @@ class EcuSession(
             frames++
             val rpm = rpmChannel?.let { snap[it] } ?: 0.0
             if (rpm >= CrankCapture.RUN_RPM) { if (runningSince == null) runningSince = snap.time } else runningSince = null
-            // From the second frame on: the first one is what opens the log the capture file goes with.
-            if (capturing && polled++ > 0) capture.update(snap.time, rpm, (snap["status3"] ?: 0.0).toInt())
+            val firstFrame = polled++ == 0L
             // Calibration left for later: only with the engine stopped or already running for a while,
             // never during cranking.
             val settled = rpm == 0.0 || runningSince?.let { snap.time - it > TUNE_AFTER_START_S } == true
             val reader = pendingTune
+            // Reading a calibration page puts it back in the RAM the logger records into, switching the
+            // logger off. With the engine stopped the calibration goes first (~1.5 s) and the capture
+            // waits; once cranking starts the calibration waits instead.
+            val calibrationFirst = reader != null && rpm == 0.0
+            // From the second frame on: the first one is what opens the log the capture file goes with.
+            if (capturing && !firstFrame && !calibrationFirst) capture.update(snap.time, rpm, (snap["status3"] ?: 0.0).toInt())
             if (reader != null && settled) {
+                if (capturing) capture.disarm()
                 val tune = reader.step()
                 if (tune != null) {
                     fallbackTune?.pcValues?.let { tune.pcValues.putAll(it) }

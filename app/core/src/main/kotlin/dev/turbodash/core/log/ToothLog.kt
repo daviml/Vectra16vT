@@ -23,10 +23,12 @@ class ToothLogWriter(private val out: Writer) : Closeable {
     init {
         out.write("# TurboDash: composite logger da MS2/Extra (pagina 0xf2) lido durante a partida\n")
         out.write("# time_s = mesmo relogio da coluna Time do .msl\n")
-        out.write("# kind: arm = leitura que liga o logger (conteudo antigo); partial = lido por tempo no arranque (registros novos no comeco);\n")
+        out.write("# cada leitura = 4 blocos de 256 bytes; o ultimo bloco religa o logger com o buffer vazio\n")
+        out.write("# kind: arm = leitura que liga o logger (normalmente zeros); partial = lido por tempo no arranque (bordas desde a leitura anterior);\n")
         out.write("#       fired = lido quando o motor pegou; full = a ECU avisou buffer completo; fail = leitura falhou (motivo em note)\n")
-        out.write("# hex = 1024 bytes: 341 registros de 3 bytes (big-endian) + 1 byte sem uso\n")
-        out.write("# registro: bit 23 SecLevel, bit 22 PriLevel, bit 21 Trigger, bit 20 Sync, bits 0-19 tempo desde a borda anterior x 0,66 us\n")
+        out.write("# hex = 1024 bytes: 341 registros de 3 bytes (big-endian) + 1 byte = versao do formato (1 quando o buffer encheu)\n")
+        out.write("# registro: bit 23 nivel do secundario, bit 22 nivel do primario, bit 21 borda veio do secundario, bit 20 sincronizado,\n")
+        out.write("#           bits 0-19 tempo desde a borda anterior x 2/3 us; registro 000000 = ainda nao gravado\n")
         out.write("time_s;kind;rpm;status3;hex;note\n")
     }
 

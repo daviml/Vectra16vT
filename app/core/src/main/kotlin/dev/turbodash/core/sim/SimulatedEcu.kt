@@ -131,24 +131,20 @@ class SimulatedEcu(
                 val table = p[2].toInt() and 0xFF
                 val off = u16(p, 3)
                 val cnt = u16(p, 5)
-                if (table == LOGGER_TABLE) {
-                    if (off != 0 || cnt != LOGGER_SIZE) return 0x84 to ByteArray(0)
-                    loggerFull()
-                    val edges = loggerEdges.toInt().coerceAtMost(LOGGER_SIZE / 3)
-                    loggerReads++
-                    loggerArmedAt = clock() // reading restarts the logger, as in the firmware
-                    loggerEdges = 0.0
-                    return 0x01 to loggerBuffer(edges)
-                }
                 if (table == ochTableId) {
                     val och = outputBlock()
-                    0x01 to och.copyOfRange(off.coerceAtMost(och.size), (off + cnt).coerceAtMost(och.size))
-                } else {
-                    val page = pageIdToIndex[table] ?: return 0x84 to ByteArray(0)
-                    val bytes = pages[page]
-                    if (off + cnt > bytes.size) return 0x84 to ByteArray(0)
-                    0x02 to bytes.copyOfRange(off, off + cnt)
+                    return 0x01 to och.copyOfRange(off.coerceAtMost(och.size), (off + cnt).coerceAtMost(och.size))
                 }
+                // MS2/Extra `serial.c`: longer reads are refused before the table is looked at.
+                if (cnt > maxRead) return 0x84 to ByteArray(0)
+                if (table in LOGGER_TABLES) return 0x01 to loggerRead(off, cnt)
+                val page = pageIdToIndex[table] ?: return 0x84 to ByteArray(0)
+                val bytes = pages[page]
+                if (off + cnt > bytes.size) return 0x84 to ByteArray(0)
+                // The calibration is copied back into the RAM the logger uses: the logger stops.
+                loggerOn = false
+                ramIsLogger = false
+                0x02 to bytes.copyOfRange(off, off + cnt)
             }
             'k' -> {
                 val page = pageIdToIndex[p.getOrNull(2)?.toInt()?.and(0xFF) ?: -1] ?: return 0x84 to ByteArray(0)
@@ -172,33 +168,65 @@ class SimulatedEcu(
 
     // ------------------------------------------------------------------ composite logger (page 0xf2)
 
-    /** How many times the logger buffer was read (tests). */
+    // Modelled on MS2/Extra 3.4.3 (`serial.c`, `ck_log_clr` in `ms2_extra_misc.c`, `isr_ign.s`):
+    // the logger buffer is the tuning page RAM; any read of a logger table stops the logger, the read
+    // that ends at 0x400 arms it again with an empty buffer, and reading a calibration page switches
+    // it off (the RAM gets the calibration back).
+
+    /** Complete passes over the logger buffer, i.e. times the logger was armed (tests). */
     @Volatile var loggerReads = 0
         private set
-    private var loggerArmedAt: Double? = null
+    /** True while the logger records edges. */
+    @Volatile var loggerOn = false
+        private set
+    private var ramIsLogger = false
+    private var ram = ByteArray(LOGGER_SIZE)
     private var loggerEdges = 0.0
     private var loggerClock = 0.0
+    private val maxRead = ini.blockingFactor.takeIf { it > 0 } ?: Int.MAX_VALUE
 
-    /** Counts trigger edges since the logger was armed: 60-2 wheel = 58 teeth per turn. */
-    private fun loggerFull(): Boolean {
-        val armed = loggerArmedAt ?: return false
-        val now = clock()
-        val rpm = source.values(now)["rpm"] ?: 0.0
-        loggerEdges += rpm / 60.0 * 58.0 * (now - maxOf(loggerClock, armed)).coerceAtLeast(0.0)
-        loggerClock = now
-        return loggerEdges >= LOGGER_SIZE / 3
+    private fun loggerRead(off: Int, cnt: Int): ByteArray {
+        if (loggerOn) { loggerFull(); ram = loggerBuffer(loggerEdges.toInt()); loggerOn = false }
+        if (!ramIsLogger) { ram = ByteArray(LOGGER_SIZE); ramIsLogger = true } // first read: page zapped
+        val data = ram.copyOfRange(off.coerceAtMost(LOGGER_SIZE), (off + cnt).coerceAtMost(LOGGER_SIZE))
+        if (off + cnt == LOGGER_SIZE) {
+            // Last piece read: logging kicked off again.
+            ram = ByteArray(LOGGER_SIZE)
+            loggerOn = true
+            loggerEdges = 0.0
+            loggerClock = clock()
+            loggerReads++
+        }
+        return data
     }
 
-    /** 341 records of 3 bytes (sync flag + tooth time in 0.66 us ticks) and one spare byte. */
+    /** Counts trigger edges while the logger is on (60-2 wheel = 58 teeth per turn); true when full. */
+    private fun loggerFull(): Boolean {
+        if (!loggerOn) return false
+        val now = clock()
+        val rpm = source.values(now)["rpm"] ?: 0.0
+        loggerEdges = (loggerEdges + rpm / 60.0 * 58.0 * (now - loggerClock).coerceAtLeast(0.0)).coerceAtMost(RECORDS.toDouble())
+        loggerClock = now
+        return loggerEdges >= RECORDS
+    }
+
+    /**
+     * 341 records of 3 bytes: bit 23 secondary pin level, 22 primary pin level, 21 edge from the
+     * secondary input, 20 synced, bits 0-19 time since the previous edge in 2/3 us ticks.
+     * Records not reached are zeros; the last byte is the format version once the buffer is full.
+     */
     private fun loggerBuffer(edges: Int): ByteArray {
         val out = ByteArray(LOGGER_SIZE)
+        val n = edges.coerceIn(0, RECORDS)
         val rpm = (source.values(clock())["rpm"] ?: 0.0).coerceAtLeast(50.0)
-        val ticks = (60.0 / rpm / 60.0 / 0.66e-6).toLong().coerceAtMost(0xFFFFF)
-        for (i in 0 until edges) {
+        val ticks = (60.0 / rpm / 60.0 / TICK_S).toLong().coerceAtMost(0xFFFFF)
+        for (i in 0 until n) {
             val gap = if (i % 58 == 57) (ticks * 3).coerceAtMost(0xFFFFF) else ticks // missing teeth
-            val v = (1L shl 20) or gap
+            val level = if (i % 2 == 0) 0x40L shl 16 else 0L
+            val v = (0x10L shl 16) or level or gap
             out[i * 3] = (v shr 16).toByte(); out[i * 3 + 1] = (v shr 8).toByte(); out[i * 3 + 2] = v.toByte()
         }
+        if (n == RECORDS) out[LOGGER_SIZE - 1] = 1
         return out
     }
 
@@ -229,8 +257,11 @@ class SimulatedEcu(
     }
 
     private companion object {
-        const val LOGGER_TABLE = 0xf2
+        val LOGGER_TABLES = 0xf0..0xf8
         const val LOGGER_SIZE = 1024
+        const val RECORDS = LOGGER_SIZE / 3
+        /** 1.5 MHz timer of the MS2. */
+        const val TICK_S = 2.0 / 3.0 * 1e-6
     }
 
     /** Wall-clock seconds since creation. */

@@ -93,12 +93,28 @@ class EcuClient(
 
     /**
      * Reads one of the MS2/Extra high speed logger buffers (0xf0 tooth, 0xf1 trigger, 0xf2 composite,
-     * 0xf3 sync error), with the same single request TunerStudio uses for its standard loggers:
-     * `r <canId> <table> 0x0000 0x0400`. Reading the buffer also restarts the logger in the ECU.
+     * 0xf3 sync error) as consecutive `r <canId> <table> <offset> <count>` requests of at most
+     * [MAX_LOGGER_BLOCK] bytes: the firmware (`serial.c`, 3.3.x/3.4.x) answers 0x84 "out of range" to
+     * any read longer than 256 bytes, which is why a single 0x400 request never worked on the car.
+     *
+     * In the firmware the first block stops the logger and clears the "done" bit of `status3`; the
+     * block that ends at 0x400 arms it again with an empty buffer. So one call returns what was
+     * recorded since the previous call and starts a new recording.
      */
     fun readLoggerBuffer(table: Int, size: Int = LOGGER_BUFFER_SIZE): ByteArray {
-        val cmd = byteArrayOf('r'.code.toByte(), canId.toByte(), table.toByte(), 0, 0, (size shr 8).toByte(), size.toByte())
-        return request(cmd, size).copyOf(size)
+        val out = ByteArray(size)
+        val block = pageBlockSize.coerceAtMost(MAX_LOGGER_BLOCK)
+        var off = 0
+        while (off < size) {
+            val n = minOf(block, size - off)
+            val cmd = byteArrayOf(
+                'r'.code.toByte(), canId.toByte(), table.toByte(),
+                (off shr 8).toByte(), off.toByte(), (n shr 8).toByte(), n.toByte(),
+            )
+            request(cmd, n).copyInto(out, off, 0, n)
+            off += n
+        }
+        return out
     }
 
     /** Throws away anything still arriving after a failed request, so the next one starts clean. */
@@ -116,5 +132,7 @@ class EcuClient(
 
     companion object {
         const val LOGGER_BUFFER_SIZE = 1024
+        /** `SRLDATASIZE` of the MS2/Extra firmware: longest read it accepts. */
+        const val MAX_LOGGER_BLOCK = 256
     }
 }
