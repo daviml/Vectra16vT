@@ -107,9 +107,10 @@ class CrankCapture(
         if (time - lastRead < MIN_GAP_S) return false
         val ready = status3 and READY_BIT != 0
         if (running) {
-            // One last buffer, the one that holds the moment the engine fired.
-            armed = false
-            return read(time, rpm, status3, if (ready) ToothBlock.KIND_FULL else ToothBlock.KIND_FIRED)
+            // One last buffer, the one that holds the moment the engine fired (tried again if it fails).
+            val ok = read(time, rpm, status3, if (ready) ToothBlock.KIND_FULL else ToothBlock.KIND_FIRED)
+            if (ok) armed = false
+            return ok
         }
         val since = crankingSince ?: return false // stopped: no new edges, a ready flag is a leftover
         return when {
@@ -126,7 +127,11 @@ class CrankCapture(
         } catch (e: Exception) {
             failures++
             consecutiveFailures++
-            armed = false
+            // A pass that failed after the first block has already stopped the logger, and the firmware
+            // keeps its buffer: the next read (after the wait) still returns those edges and arms it again,
+            // so it stays a partial/fired read. Seen on the car on 2026-11-26: error 0x81 while cranking at
+            // 11.2 V, the next read held the 75 records of the cranking. Only a failed arming read re-arms.
+            if (kind == ToothBlock.KIND_ARM) armed = false
             retryAt = time + minOf(RETRY_S * consecutiveFailures, RETRY_MAX_S)
             onBlock(ToothBlock(time, ToothBlock.KIND_FAIL, rpm, status3, ByteArray(0), "$kind: ${e.javaClass.simpleName}: ${e.message ?: ""}"))
             onFailure(e)

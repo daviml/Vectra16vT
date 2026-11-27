@@ -102,6 +102,24 @@ class CrankCaptureTest {
     }
 
     @Test
+    fun `a read that fails while cranking keeps its kind, so the edges kept by the ECU are not lost`() {
+        val f = Fake()
+        assertTrue(f.capture.update(0.0, 0.0, 0))          // arm
+        assertFalse(f.capture.update(1.0, 130.0, 0))       // cranking starts
+        f.fail = true
+        assertFalse(f.capture.update(2.3, 130.0, 0))       // first cranking read: error 0x81 on a block
+        assertFalse(f.capture.update(2.6, 900.0, 0))       // fired, still inside the 1 s wait
+        f.fail = false
+        assertTrue(f.capture.update(3.4, 1000.0, 0))       // the buffer of the cranking, as a fired read
+        assertFalse(f.capture.update(5.0, 1000.0, 0x02))   // then left alone
+        f.fail = true
+        assertFalse(f.capture.update(60.0, 0.0, 0))        // stalled, arming fails
+        f.fail = false
+        assertTrue(f.capture.update(61.5, 0.0, 0))         // arming tried again
+        assertEquals(listOf("arm", "fail", "fired", "fail", "arm"), f.blocks.map { it.kind })
+    }
+
+    @Test
     fun `a logger switched off behind its back is armed again`() {
         val f = Fake()
         assertTrue(f.capture.update(0.0, 0.0, 0))

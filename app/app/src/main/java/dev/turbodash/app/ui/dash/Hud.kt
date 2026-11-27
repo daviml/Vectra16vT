@@ -75,6 +75,8 @@ class HudFrame(
     val lambdaTarget: Double?,
     val launch: LaunchState,
     val pops: Boolean,
+    /** Crank trigger capture badge, null = hidden. */
+    val teeth: dev.turbodash.core.ecu.TeethBadge? = null,
 )
 
 private val T = DashTemplates
@@ -562,6 +564,14 @@ private fun LampStrip(
         Spacer(Modifier.weight(1f))
         Lamp("LAUNCH", if (f.launch != LaunchState.OFF) Palette.warn else null, f.launch == LaunchState.ACTIVE, flash, compact)
         Lamp("POPS", if (f.pops) RaceRed else null, f.pops, flash, compact)
+        // Only while there is something to say about the crank capture (stopped/cranking, or just fired).
+        f.teeth?.let { t ->
+            Lamp(
+                if (t == dev.turbodash.core.ecu.TeethBadge.CAPTURED) "DENTES ✓" else "DENTES",
+                if (t == dev.turbodash.core.ecu.TeethBadge.FAILED) RaceRed else TeethGreen,
+                false, flash, compact,
+            )
+        }
         level(T.clt).let { (c, b) -> Lamp("ÁGUA", c, b, flash, compact) }
         level(T.fuel).let { (c, b) -> Lamp("COMB", c, b, flash, compact) }
         level(T.batt).let { (c, b) -> Lamp("BAT", c, b, flash, compact) }

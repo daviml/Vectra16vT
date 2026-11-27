@@ -56,6 +56,9 @@ data class TuneInfo(val tune: Tune, val fromEcu: Boolean)
 
 data class LogStatus(val file: File, val rows: Int, val startedAt: Long)
 
+/** A crank trigger capture read: its kind, the rpm then, and when it happened ([android.os.SystemClock.elapsedRealtime]). */
+data class TeethRead(val kind: String, val rpm: Double, val atMs: Long)
+
 /**
  * App-wide owner of the ECU session. UI observes the flows; the session runs on its own thread.
  */
@@ -81,6 +84,10 @@ class SessionManager(private val context: Context, private val store: ProfileSto
 
     private val _ini = MutableStateFlow<IniDefinition?>(null)
     val ini: StateFlow<IniDefinition?> = _ini.asStateFlow()
+
+    /** Last crank trigger capture read of this connection (for the DENTES badge); null = none. */
+    private val _teeth = MutableStateFlow<TeethRead?>(null)
+    val teeth: StateFlow<TeethRead?> = _teeth.asStateFlow()
 
     val logsDir = File(context.filesDir, "logs").apply { mkdirs() }
 
@@ -257,6 +264,8 @@ class SessionManager(private val context: Context, private val store: ProfileSto
         override fun onState(state: SessionState) {
             if (gen != generation) return
             _state.value = state
+            // A new connection arms the capture again: forget the previous one's badge.
+            if (state !is SessionState.Running && state !is SessionState.ReadingTune) _teeth.value = null
             // One log per connection: it opens when data starts flowing and closes as soon as the
             // link drops (car off, out of range), so the next connection starts a new file.
             if (state is SessionState.Running) {
@@ -278,6 +287,7 @@ class SessionManager(private val context: Context, private val store: ProfileSto
 
         override fun onToothBlock(block: ToothBlock) {
             if (gen != generation) return
+            _teeth.value = TeethRead(block.kind, block.rpm, android.os.SystemClock.elapsedRealtime())
             synchronized(logLock) {
                 val log = _log.value?.file ?: return // not logging: nowhere to keep it
                 if (writer == null) return

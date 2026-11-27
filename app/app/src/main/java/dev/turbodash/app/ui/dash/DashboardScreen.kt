@@ -81,6 +81,11 @@ fun DashboardScreen(
     val now = android.os.SystemClock.elapsedRealtime()
     if (popsNow) popsUntil[0] = now + 700
     val pops = popsNow || now < popsUntil[0]
+    // Crank trigger capture: armed / start recorded / read failed (the frames keep this recomposing).
+    val teethRead by sessions.teeth.collectAsStateWithLifecycle()
+    val teeth = teethRead?.let { r ->
+        dev.turbodash.core.ecu.Teeth.badge(r.kind, r.rpm, (now - r.atMs) / 1000.0, roles?.let { snapshot?.let { s -> valueOf(Role.RPM, s, it) } })
+    }
     val pager = rememberPagerState { 1 + DashTemplates.all.size }
 
     // The dash is meant to stay on while driving.
@@ -101,10 +106,11 @@ fun DashboardScreen(
         lambdaTarget = if (s != null) roles?.lambdaTarget(s) else null,
         launch = launch,
         pops = pops,
+        teeth = teeth,
     )
 
     @Composable
-    fun Status() = StatusBar(state, log?.rows, launch, pops, onOpenMenu, onOpenSettings, Modifier.fillMaxWidth())
+    fun Status() = StatusBar(state, log?.rows, launch, pops, teeth, onOpenMenu, onOpenSettings, Modifier.fillMaxWidth())
 
     // Each page draws its own top line, so swiping does not make the layout jump.
     HorizontalPager(pager, Modifier.fillMaxSize().background(Palette.background)) { page ->
@@ -175,6 +181,7 @@ private fun StatusBar(
     logRows: Int?,
     launch: dev.turbodash.core.ecu.LaunchState,
     pops: Boolean,
+    teeth: dev.turbodash.core.ecu.TeethBadge?,
     onOpenMenu: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier,
@@ -200,6 +207,7 @@ private fun StatusBar(
             launch != dev.turbodash.core.ecu.LaunchState.OFF ->
                 Box(Modifier.weight(1f)) { LaunchBadge(active = launch == dev.turbodash.core.ecu.LaunchState.ACTIVE) }
             pops -> Box(Modifier.weight(1f)) { PopsBadge() }
+            teeth != null -> Box(Modifier.weight(1f)) { TeethBadgeView(teeth) }
             else -> Text(text, color = color, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 2)
         }
         // Brand logo, small, on the status line only (the gauges stay clean).
@@ -237,6 +245,29 @@ private fun LaunchBadge(active: Boolean) {
     )
 }
 
+/**
+ * Crank trigger capture: green outline while armed (waiting for the start), filled green with a
+ * check once the start is in the file, red when the last read failed.
+ */
+@Composable
+private fun TeethBadgeView(badge: dev.turbodash.core.ecu.TeethBadge) {
+    val shape = RoundedCornerShape(6.dp)
+    val (label, fill, line) = when (badge) {
+        dev.turbodash.core.ecu.TeethBadge.ARMED -> Triple("DENTES", null, TeethGreen)
+        dev.turbodash.core.ecu.TeethBadge.CAPTURED -> Triple("DENTES ✓", TeethGreen, TeethGreen)
+        dev.turbodash.core.ecu.TeethBadge.FAILED -> Triple("DENTES", Palette.danger, Palette.danger)
+    }
+    Text(
+        label,
+        color = if (fill != null) Color.White else line,
+        fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp,
+        modifier = Modifier
+            .clip(shape)
+            .then(if (fill != null) Modifier.background(fill) else Modifier.border(1.5.dp, line, shape))
+            .padding(horizontal = 10.dp, vertical = 1.dp),
+    )
+}
+
 /** Overrun pops window (foot off, retarded spark, fuel still on): red, flickering like a backfire. */
 @Composable
 private fun PopsBadge() {
@@ -254,3 +285,6 @@ private fun PopsBadge() {
             .padding(horizontal = 10.dp, vertical = 1.dp),
     )
 }
+
+/** Green of the DENTES badge (the teal "ok" of the connection dot reads as blue next to it). */
+internal val TeethGreen = Color(0xFF22C55E)
